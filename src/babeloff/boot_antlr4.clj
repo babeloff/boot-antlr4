@@ -71,10 +71,10 @@
   [args option object]
   (if object
     (do
-      (util/info "arg: %s %s\n" option object)
+      ;(util/info "arg: %s %s\n" option object)
       (conj! args option object))
     (do
-      (util/info "no-arg: %s %s\n" option object)
+      ;(util/info "no-arg: %s %s\n" option object)
       args)))
 
 
@@ -82,10 +82,10 @@
   [args option object]
   (if (sequential? option)
     (do
-      (util/info "arg: %s %s\n" option object)
+      ;(util/info "arg: %s %s\n" option object)
       (conj! args (if object (first option) (second option))))
     (do
-      (util/info "arg: %s %s\n" option object)
+      ;(util/info "arg: %s %s\n" option object)
       (if object
         (conj! args option)
         args))))
@@ -93,16 +93,24 @@
 (defn override-opt!
   [args overrides]
   (if-not (empty? overrides)
-    (do
-      (util/info "no-overrides\n"))
+    (do)
+      ;(util/info "no-overrides\n"))
     (loop [argset args,
            items overrides]
       (if (empty? items)
         argset
         (do
-          (util/info "arg: %s\n" (first items))
+          ;(util/info "arg: %s\n" (first items))
           (recur (conj! argset (str "-D" (first items)))
                  (rest items)))))))
+
+(defn source-opt!
+  [args source fileset]
+  (if source
+    (conj! args "-lib" source)
+    (-> args
+      (conj! "-lib")
+      (conj! (.getCanonicalPath (first (boot/input-dirs fileset)))))))
 
 ;; https://github.com/antlr/antlr4/blob/master/doc/tool-options.md
 ;; https://github.com/antlr/antlr4/blob/master/tool/src/org/antlr/v4/Tool.java
@@ -134,14 +142,14 @@
         (*usage*)
         fileset)
       (do
-        (util/info "grammar: %s\n" grammar)
-        (util/info "source: %s\n" source)
-        (util/info "target: %s\n" target)
-        (let [target1 (or target (boot/tmp-dir!))
-              source1 (or source fileset)
+        ;(util/info "grammar: %s\n" grammar)
+        ;(util/info "source: %s\n" source)
+        ;(util/info "target: %s\n" target)
+        (let [target-dir (boot/tmp-dir!)
+              target-dir-str (.getCanonicalPath target-dir)
               args
-              (->
-                  (transient ["-o" target1 "-lib" source1])
+              (-> (transient ["-o" target-dir-str])
+                  (source-opt! source fileset)
                   (value-opt! "-encoding" encoding)
                   (value-opt! "-message-format" message-format)
                   (value-opt! "-package" package)
@@ -151,7 +159,7 @@
                   (bool-opt! "-atn" atn)
                   (bool-opt! "-long-messages" long-messages)
                   (bool-opt! ["-listener" "-no-listener"] listener)
-                  (bool-opt! ["-visitor" "-no-vistor"] visitor)
+                  (bool-opt! ["-visitor" "-no-visitor"] visitor)
                   (bool-opt! "-depend" depend)
 
                   (bool-opt! "-Werror" warn-error)
@@ -162,15 +170,16 @@
                   (bool-opt! "-Xlog" log)
                   (conj! grammar))
               args1 (persistent! args)]
-            (util/info "compiling grammar: %s\n" grammar)
+
             (if show
               (do
                 (util/info "arguments: %s\n" *opts*)
                 fileset)
               (do
-                (Tool. args1)
+                (util/info "compiling grammar: %s\n" args1)
+                (Tool. (into-array args1))
                 (-> fileset
-                    (boot/add-resource target1)
+                    (boot/add-resource target-dir)
                     boot/commit!))))))))
 
 ;;(deftesttask antlr4-tests []
