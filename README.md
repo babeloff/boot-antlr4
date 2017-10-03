@@ -1,4 +1,4 @@
-# antlr4
+# boot-antlr4
 
 Boot tasks to work with antlr4.
 
