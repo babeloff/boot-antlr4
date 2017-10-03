@@ -6,9 +6,9 @@ Boot tasks to work with antlr4.
 
 Anltr4 is a parser and lexer generator.
 
-Run the `antlr4-pre` task:
+Run the `antlr4` task:
 
-    $ boot antlr4-pre
+    $ boot antlr4 -g AqlLexerRules.g4
 
 To use this in your project, add `[babeloff/antlr4 "0.1.0-SNAPSHOT"]` to your `:dependencies`
 and then require the task:
