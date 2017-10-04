@@ -3,6 +3,7 @@
   {:boot/export-tasks true}
   (:require [boot.core :as boot :refer [deftask]]
             [boot.util :as util]
+            [clojure.java.io :as io]
             [boot.task-helpers :as helper]
             [clojure.pprint :as pp])
   (:import (org.antlr.v4 Tool)
@@ -149,14 +150,13 @@
                  (.append " ")
                  (.append (first arr)))))));
 
-(defn run-antlr4
-  [args]
+(defn run-antlr4!
+  [args show]
+  (when show (show-array args))
   (util/info "running antlr4: %s\n"
     (with-err-str
-        (let [antlr (Tool. args)]
+        (let [antlr (Tool. (into-array args))]
           (.processGrammarsOnCommandLine antlr)))))
-          ;; (.exit antlr 0)))))
-
 
 ;; https://github.com/antlr/antlr4/blob/master/doc/tool-options.md
 ;; https://github.com/antlr/antlr4/blob/master/tool/src/org/antlr/v4/Tool.java
@@ -196,55 +196,57 @@
 
         (boot/empty-dir! target-dir)
         (util/info "target: %s\n" target-dir-str)
-        (cond
-          show
-          (do
-            (util/info "arguments: %s\n" *opts*)
-            fileset)
+        ;; load the tokens files into the tmp-dir
+        (let [in-files (boot/input-files fileset)
+              token-files (boot/by-ext [".tokens"] in-files)]
+          (doseq [tf token-files]
+            (let [rel-path  (boot/tmp-path tf)
+                  tgt-file  (io/file target-dir rel-path)
+                  src-file  (boot/tmp-file tf)]
+              (util/info "token: %s %s\n" src-file tgt-file)
+              (io/copy src-file tgt-file))))
 
-          :else
-          (let [grammar-file (boot/tmp-get fileset grammar)
-                grammar-file' (boot/tmp-file grammar-file)
-                grammar-file-str (.getCanonicalPath grammar-file')]
-            ;(util/info "grammar: %s\n" grammar)
-            ;(util/info "source: %s\n" source)
-            ;(util/info "target: %s\n" target)
-            (util/info "compiling grammar: %s\n" grammar)
+        (let [grammar-file (boot/tmp-get fileset grammar)
+              grammar-file' (boot/tmp-file grammar-file)
+              grammar-file-str (.getCanonicalPath grammar-file')]
+          ;(util/info "grammar: %s\n" grammar)
+          ;(util/info "source: %s\n" source)
+          ;(util/info "target: %s\n" target)
+          (util/info "compiling grammar: %s\n" grammar)
 
-            (-> (transient ["-o" target-dir-str])
-                (source-opt! source fileset)
+          (-> (transient ["-o" target-dir-str])
+              (source-opt! source fileset)
 
-                (value-opt! "-encoding" encoding)
-                (value-opt! "-message-format" message-format)
-                (value-opt! "-package" package)
+              (value-opt! "-encoding" encoding)
+              (value-opt! "-message-format" message-format)
+              (value-opt! "-package" package)
 
-                (override-opt! override)
+              (override-opt! override)
 
-                (bool-opt! "-atn" atn)
-                (bool-opt! "-long-messages" long-messages)
-                (bool-opt! ["-listener" "-no-listener"] listener)
-                (bool-opt! ["-visitor" "-no-visitor"] visitor)
-                (bool-opt! "-depend" depend)
+              (bool-opt! "-atn" atn)
+              (bool-opt! "-long-messages" long-messages)
+              (bool-opt! ["-listener" "-no-listener"] listener)
+              (bool-opt! ["-visitor" "-no-visitor"] visitor)
+              (bool-opt! "-depend" depend)
 
-                (bool-opt! "-Werror" warn-error)
-                (bool-opt! "-XdbgST" debug-st)
-                (bool-opt! "-Xsave-lexer" save-lexer)
-                (bool-opt! "-XdbgSTWait" debug-st-wait)
-                (bool-opt! "-Xforce-atn" force-atn)
-                (bool-opt! "-Xlog" log)
-                (conj! grammar-file-str)
-                persistent!
-                into-array
-                show-array
-                run-antlr4)
+              (bool-opt! "-Werror" warn-error)
+              (bool-opt! "-XdbgST" debug-st)
+              (bool-opt! "-Xsave-lexer" save-lexer)
+              (bool-opt! "-XdbgSTWait" debug-st-wait)
+              (bool-opt! "-Xforce-atn" force-atn)
+              (bool-opt! "-Xlog" log)
+              (conj! grammar-file-str)
+              persistent!
+              (run-antlr4! show))
 
-            ;; prepare fileset and call next-handler
-            (let [fileset' (boot/add-resource fileset target-dir)
-                  fileset'' (boot/commit! fileset')
-                  result (next-handler fileset'')]
-              ;; inbound/post processing
-              ;; the goal here is to perform any side effects
-              result)))))))
+          ;; prepare fileset and call next-handler
+          (let [fileset' (-> fileset
+                             (boot/add-resource target-dir)
+                             boot/commit!)
+                result (next-handler fileset')]
+            ;; inbound/post processing
+            ;; the goal here is to perform any side effects
+            result))))))
 
 ;;(deftesttask antlr4-tests []
 ;;  (comp (antlr4 :grammar "AqlCommentTest.g4" :show 5)
