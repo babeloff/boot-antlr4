@@ -1,22 +1,35 @@
 (ns babeloff.boot-antlr4
   "an antlr task that builds lexers and parsers."
   {:boot/export-tasks true}
-  (:require [boot.core :as boot :refer [deftask]]
-            [boot.util :as util]
-            [clojure.java.io :as io]
-            [boot.task-helpers :as helper]
-            [clojure.pprint :as pp])
-  (:import (org.antlr.v4 Tool)
-           (org.antlr.v4.gui TestRig)
+  (:require (boot [core :as boot :refer [deftask]]
+                  [util :as util]
+                  [task-helpers :as helper])
+            (clojure [pprint :as pp])
+            (clojure.java [io :as io]
+                          [classpath :as cp]))
+  (:import (clojure.lang DynamicClassLoader)
+           (org.antlr.v4 Tool)
            (org.antlr.v4.tool LexerGrammar
                               Grammar)
            (org.antlr.v4.parse ANTLRParser)
-           (org.antlr.v4.runtime CharStreams
-                                 CommonTokenStream
+           (org.antlr.v4.runtime CharStream CharStreams
+                                 CommonToken CommonTokenStream
+                                 DiagnosticErrorListener
                                  Lexer LexerInterpreter
-                                 Parser ParserInterpreter)
+                                 Parser ParserInterpreter
+                                 ParserRuleContext
+                                 Token TokenStream)
+           (org.antlr.v4.runtime.atn PredictionMode)
            (org.antlr.v4.runtime.tree ParseTree)
-           (java.nio.file Paths)))
+           (org.antlr.v4.gui Trees)
+           (java.nio.file Paths)
+           (java.nio.charset Charset)
+           (java.io IOException)
+           (java.lang.reflect Constructor
+                              InvocationTargetException
+                              Method)
+           (java.util ArrayList
+                      List)))
 
 
 (defmacro with-err-str
@@ -125,18 +138,6 @@
       (conj! "-lib")
       (conj! (.getCanonicalPath (first (boot/input-dirs fileset)))))))
 
-(defn show-fileset
-  [fileset]
-  (util/info "show fileset\n")
-  (doseq [tf (boot/input-files fileset)]
-    (util/info "input %s\n" (boot/tmp-path tf)))
-  (doseq [tf (boot/output-files fileset)]
-    (util/info "output %s\n" (boot/tmp-path tf)))
-  (doseq [tf (boot/user-files fileset)]
-    (util/info "user %s\n" (boot/tmp-path tf)))
-  (helper/print-fileset fileset)
-  fileset)
-
 (defn show-array
   [arry]
   (loop [arr arry, builder (StringBuilder.)]
@@ -150,7 +151,9 @@
                  (.append " ")
                  (.append (first arr)))))));
 
+;; https://github.com/antlr/antlr4/blob/master/tool/src/org/antlr/v4/Tool.java
 (defn run-antlr4!
+  ""
   [args show]
   (when show (show-array args))
   (util/info "running antlr4: %s\n"
@@ -252,20 +255,118 @@
 ;;  (comp (antlr4 :grammar "AqlCommentTest.g4" :show 5)
 ;;        (to-asset-invert-tests))))
 
-(deftask foo
-  "A task that generates parsers and lexers from antlr grammars."
-  [g grammar        FILE    str    "grammar file"]
+
+;; https://github.com/antlr/antlr4/blob/master/tool/src/org/antlr/v4/gui/TestRig.java
+(defn parse!
+  ""
+  [args]
+  (when (:show args)
+    (util/info "parse options: \n" args))
+
+  ;; would it be better to use the
+  (let [class-loader (.getContextClassLoader (Thread/currentThread))
+        lexer-class ^Lexer (-> class-loader
+                               (.loadClass (:lexer args)))
+        lexer-ctor (.getConstructor lexer-class CharStream)
+        lexer (.newInstance lexer-ctor nil)
+
+        parser-class ^Parser (-> class-loader
+                                 (.loadClass (:parser args)))
+        parser-ctor (.getConstructor lexer-class TokenStream)
+        parser (.newInstance parser-ctor nil)
+        char-set (Charset/defaultCharset)]
+
+    (doseq [files (:input args)]
+      (let [input (first files)
+            char-stream (-> (Paths/get input)
+                            (CharStreams/fromPath char-set))
+            tokens (CommonTokenStream. lexer)]
+        (.setInputStream input)
+        (.fill tokens)
+
+        (when (:show-tokens args)
+          (util/info "token:  show \n")
+          (doseq [tok (.getTokens tokens)]
+            (if (instance? CommonToken tok)
+              (util/info "  %s\n" (.toString tok lexer))
+              (util/info "  %s\n" (.toString tok)))))
+
+        (when (:diagnostics args)
+          (util/info "enable diagnostics \n")
+          (.addErrorListener parser (DiagnosticErrorListener.))
+          (-> parser
+              .getInterpreter
+              (.setPredictionMode PredictionMode/LL_EXACT_AMBIG_DETECTION))
+
+         (when (some #{:print-tree :gui :postscript} (keys args))
+           (util/info "enable diagnostics \n")
+           (.setBuildParseTree parser true))
+
+         (when (:use-sll args)
+           (util/info "use SLL \n")
+           (-> parser
+               .getInterpreter
+               (.setPredictionMode PredictionMode/SLL)))
+
+         (doto parser
+           (.setTokenStream tokens)
+           (.setTrace (:trace args)))
+
+         (try
+           (let [start-rule (.getMethod parser-class (:start-rule args))
+                 tree (.invoke start-rule parser nil)]
+             (when (:print-tree args)
+               (util/info "print tree \n" (.toStringTree tree parser)))
+             (when (:inspect-tree args)
+               (util/info "inspect tree \n")
+               (Trees/inspect tree parser))
+             (when (:postscript args)
+               (util/info "print tree as postscript \n")
+               (Trees/save tree parser (:postscript args))))
+           (catch NoSuchMethodException ex
+                  (util/info "no method for rule %s or it has arguements \n"
+                             (:start-rule args)))
+           (finally
+                    (util/info "releasing"))))))))
+
+(deftask test-rig
+  "A task that runs parsers and lexers against samples."
+  [p parser         CLASS   str    "parser name"
+   l lexer          CLASS   str    "lexer name"
+   r start-rule     LIB_DIR str    "the name of the first rule to match"
+   z postscript     CODE    str    "produce a postscript output of the parse tree"
+   e encoding       STYLE   str    "specify output STYLE for messages in antlr, gnu, vs2005"
+   i input          OPT     [str]  "the file name of the input to parse"
+   s show                   bool   "show the constructed properties"
+   a tokens                 bool   "produce the annotated token stream"
+   t tree                   bool   "produce the annotated parse tree"
+   v gui                    bool   "produce the parse tree as a window"
+   x trace                  bool   "show the progress that the parser makes"
+   d diagnostics            bool   "show some diagnostics"
+   f sll                    bool   "use the fast SLL prediction mode"]
+  (if-not parser
+    (do
+      (boot.util/fail "The --parser argument is required")
+      (*usage*)))
+  (if-not start-rule
+    (do
+      (boot.util/fail "The --start-rule argument is required")
+      (*usage*)))
+
   (let [target-dir (boot/tmp-dir!)
         target-dir-str (.getCanonicalPath target-dir)]
     (fn middleware [next-handler]
       (fn handler [fileset]
-        ;(boot/empty-dir! target-dir)
+        (boot/empty-dir! target-dir)
         (util/info "target: %s\n" target-dir-str)
-        ;; pre-processing
-        ;; produce the fileset for the next-handler                              ; [7]
-        (let [fileset'  (... fileset)
-              fileset'' (boot/commit! fileset')
-              result    (next-handler fileset'')]
-          ;; post-processing
-          ;; produce any side effects
+        (util/info "parser: %s\n" parser)
+        (parse! *opts*)
+
+        ;; prepare fileset and call next-handler
+        (let [fileset' (-> fileset
+                           (boot/add-resource target-dir)
+                           boot/commit!)
+              result (next-handler fileset')]
+          ;; inbound/post processing
+          ;; the goal here is to perform any side effects
           result)))))

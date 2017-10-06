@@ -7,7 +7,8 @@
                             [boot/core "RELEASE" :scope "test"]
                             [adzerk/boot-test "RELEASE" :scope "test"]
                             ;; https://mvnrepository.com/artifact/org.antlr/antlr4
-                            [org.antlr/antlr4 "4.7"]])
+                            [org.antlr/antlr4 "4.7"]
+                            [org.clojure/java.classpath "0.2.3"]])
 
 (task-options!
  pom {:project     project
