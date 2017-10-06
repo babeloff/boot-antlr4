@@ -98,7 +98,9 @@
   (if object
     (do
       ;(util/info "arg: %s %s\n" option object)
-      (conj! args option object))
+      (-> args
+          (conj! option)
+          (conj! object)))
     (do
       ;(util/info "no-arg: %s %s\n" option object)
       args)))
@@ -132,11 +134,10 @@
 
 (defn source-opt!
   [args source fileset]
-  (if source
-    (conj! args "-lib" source)
-    (-> args
-      (conj! "-lib")
-      (conj! (.getCanonicalPath (first (boot/input-dirs fileset)))))))
+  (-> args
+    (conj! "-lib")
+    (conj! (or source
+             (.getCanonicalPath (first (boot/input-dirs fileset)))))))
 
 (defn show-array
   [arry]
@@ -257,78 +258,7 @@
 
 
 ;; https://github.com/antlr/antlr4/blob/master/tool/src/org/antlr/v4/gui/TestRig.java
-(defn parse!
-  ""
-  [args]
-  (when (:show args)
-    (util/info "parse options: \n" args))
-
-  ;; would it be better to use the
-  (let [class-loader (.getContextClassLoader (Thread/currentThread))
-        lexer-class ^Lexer (-> class-loader
-                               (.loadClass (:lexer args)))
-        lexer-ctor (.getConstructor lexer-class CharStream)
-        lexer (.newInstance lexer-ctor nil)
-
-        parser-class ^Parser (-> class-loader
-                                 (.loadClass (:parser args)))
-        parser-ctor (.getConstructor lexer-class TokenStream)
-        parser (.newInstance parser-ctor nil)
-        char-set (Charset/defaultCharset)]
-
-    (doseq [files (:input args)]
-      (let [input (first files)
-            char-stream (-> (Paths/get input)
-                            (CharStreams/fromPath char-set))
-            tokens (CommonTokenStream. lexer)]
-        (.setInputStream input)
-        (.fill tokens)
-
-        (when (:show-tokens args)
-          (util/info "token:  show \n")
-          (doseq [tok (.getTokens tokens)]
-            (if (instance? CommonToken tok)
-              (util/info "  %s\n" (.toString tok lexer))
-              (util/info "  %s\n" (.toString tok)))))
-
-        (when (:diagnostics args)
-          (util/info "enable diagnostics \n")
-          (.addErrorListener parser (DiagnosticErrorListener.))
-          (-> parser
-              .getInterpreter
-              (.setPredictionMode PredictionMode/LL_EXACT_AMBIG_DETECTION))
-
-         (when (some #{:print-tree :gui :postscript} (keys args))
-           (util/info "enable diagnostics \n")
-           (.setBuildParseTree parser true))
-
-         (when (:use-sll args)
-           (util/info "use SLL \n")
-           (-> parser
-               .getInterpreter
-               (.setPredictionMode PredictionMode/SLL)))
-
-         (doto parser
-           (.setTokenStream tokens)
-           (.setTrace (:trace args)))
-
-         (try
-           (let [start-rule (.getMethod parser-class (:start-rule args))
-                 tree (.invoke start-rule parser nil)]
-             (when (:print-tree args)
-               (util/info "print tree \n" (.toStringTree tree parser)))
-             (when (:inspect-tree args)
-               (util/info "inspect tree \n")
-               (Trees/inspect tree parser))
-             (when (:postscript args)
-               (util/info "print tree as postscript \n")
-               (Trees/save tree parser (:postscript args))))
-           (catch NoSuchMethodException ex
-                  (util/info "no method for rule %s or it has arguements \n"
-                             (:start-rule args)))
-           (finally
-                    (util/info "releasing"))))))))
-
+;; https://github.com/alandipert/boot-java-task-example
 (deftask test-rig
   "A task that runs parsers and lexers against samples."
   [p parser         CLASS   str    "parser name"
@@ -360,13 +290,81 @@
         (boot/empty-dir! target-dir)
         (util/info "target: %s\n" target-dir-str)
         (util/info "parser: %s\n" parser)
-        (parse! *opts*)
+
+       (when show
+         (util/info "parse options: \n" *opts*))
+
+       (let [class-loader (.getContextClassLoader (Thread/currentThread))
+             lexer-class ^Lexer (-> class-loader
+                                   (.loadClass lexer))
+             lexer-ctor (.getConstructor lexer-class CharStream)
+             lexer (.newInstance lexer-ctor nil)
+
+             parser-class ^Parser (-> class-loader
+                                     (.loadClass parser))
+             parser-ctor (.getConstructor lexer-class TokenStream)
+             parser (.newInstance parser-ctor nil)
+
+             char-set (Charset/defaultCharset)]
+
+         (doseq [files input]
+           (let [input (first files)
+                 char-stream (-> (Paths/get input)
+                                 (CharStreams/fromPath char-set))
+                 tokens (CommonTokenStream. lexer)]
+              (.setInputStream input)
+              (.fill tokens)
+
+              (when tokens
+                (util/info "token:  show \n")
+                (doseq [tok (.getTokens tokens)]
+                  (if (instance? CommonToken tok)
+                    (util/info "  %s\n" (.toString tok lexer))
+                    (util/info "  %s\n" (.toString tok)))))
+
+              (when diagnostics
+                (util/info "enable diagnostics \n")
+                (.addErrorListener parser (DiagnosticErrorListener.))
+                (-> parser
+                    .getInterpreter
+                    (.setPredictionMode PredictionMode/LL_EXACT_AMBIG_DETECTION))
+
+               (when (or print-tree gui postscript)
+                 (util/info "enable diagnostics \n")
+                 (.setBuildParseTree parser true))
+
+               (when sll
+                 (util/info "use SLL \n")
+                 (-> parser
+                     .getInterpreter
+                     (.setPredictionMode PredictionMode/SLL)))
+
+               (doto parser
+                 (.setTokenStream tokens)
+                 (.setTrace trace))
+
+               (try
+                 (let [start-rule (.getMethod parser-class start-rule)
+                       tree (.invoke start-rule parser nil)]
+                   (when print-tree
+                     (util/info "print tree \n" (.toStringTree tree parser)))
+                   (when tree
+                     (util/info "inspect tree \n")
+                     (Trees/inspect tree parser))
+                   (when postscript
+                     (util/info "print tree as postscript \n")
+                     (Trees/save tree parser postscript)))
+                 (catch NoSuchMethodException ex
+                        (util/info "no method for rule %s or it has arguements \n"
+                                   start-rule))
+                 (finally
+                          (util/info "releasing")))))))
 
         ;; prepare fileset and call next-handler
-        (let [fileset' (-> fileset
-                           (boot/add-resource target-dir)
-                           boot/commit!)
-              result (next-handler fileset')]
-          ;; inbound/post processing
-          ;; the goal here is to perform any side effects
-          result)))))
+       (let [fileset' (-> fileset
+                          (boot/add-resource target-dir)
+                          boot/commit!)
+             result (next-handler fileset')]
+        ;; post processing
+        ;; the goal here is to perform any side effects
+        result)))))
