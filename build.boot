@@ -27,5 +27,4 @@
   (comp (pom) (jar) (install)))
 
 (require '[adzerk.boot-test :refer [test]]
-         '[babeloff.boot-antlr4 :refer [antlr4
-                                        antlr4-interpreter]])
+         '[babeloff.boot-antlr4 :refer [antlr4]])

@@ -7,7 +7,8 @@
             (clojure [pprint :as pp])
             (clojure.java [io :as io]
                           [classpath :as cp]))
-  (:import (clojure.lang DynamicClassLoader)
+  (:import (clojure.lang DynamicClassLoader
+                         Reflector)
            (org.antlr.v4 Tool)
            (org.antlr.v4.tool LexerGrammar
                               Grammar)
@@ -15,9 +16,7 @@
            (org.antlr.v4.runtime CharStream CharStreams
                                  CommonToken CommonTokenStream
                                  DiagnosticErrorListener
-                                 Lexer LexerInterpreter
-                                 Parser ParserInterpreter
-                                 ParserRuleContext
+                                 Lexer Parser 
                                  Token TokenStream)
            (org.antlr.v4.runtime.atn PredictionMode)
            (org.antlr.v4.runtime.tree ParseTree)
@@ -25,9 +24,6 @@
            (java.nio.file Paths)
            (java.nio.charset Charset)
            (java.io IOException)
-           (java.lang.reflect Constructor
-                              InvocationTargetException
-                              Method)
            (java.util ArrayList
                       List)))
 
@@ -42,56 +38,6 @@
      (binding [*out* s#, *err* s#]
        ~@body
        (str s#))))
-
-;; https://github.com/antlr/antlr4/blob/master/doc/interpreters.md
-
-(defn load-lexer-grammar
-  [^String lexerGrammarFileName]
-  ^LexerGrammar (Grammar/load lexerGrammarFileName))
-
-(defn load-parser-grammar
-  [^LexerGrammar lexer-grammar
-   ^String parserGrammarFileName]
-  ^ParserGrammar (Grammar/load parserGrammarFileName))
-
-
-(defn interpret-combined
-  [^String fileName
-   ^String combinedGrammarFileName
-   ^String startRule]
-  (let [grammar (Grammar/load combinedGrammarFileName)
-        char-stream (CharStreams/fromPath (Paths/get fileName))
-        lexer (.createLexerInterpreter grammar char-stream)
-
-        token-stream (CommonTokenStream. lexer)
-        parser (.createParserInterpreter grammar token-stream)]
-
-    (.parse parser (.index (.getRule grammar startRule)))))
-
-(defn interpret-separate
-  [^String fileNameToParse
-   ^String lexerGrammarFileName
-   ^String parserGrammarFileName
-   ^String startRule]
-  (let [^LexerGrammar lexer-grammar (Grammar/load lexerGrammarFileName)
-        char-stream (CharStreams/fromPath (Paths/get fileNameToParse))
-        lexer (.createLexerInterpreter lexer-grammar char-stream)
-
-        parser-grammar (Grammar/load parserGrammarFileName)
-        token-stream  (CommonTokenStream. lexer)
-        parser (.createParserInterpreter parser-grammar token-stream)]
-
-    (.parse parser (.index (.getRule parser-grammar startRule)))))
-
-(defn print-tree [tree parser]
-    (pp/pprint (.toStringTree tree parser)))
-
-(deftask antlr4-interpreter
-  "A task that returns a parser for a grammar.
-   typically this parser would be returned to a REPL."
-  [g grammar FILE str "grammar file"
-   l lexer bool "enable lexer for grammar"
-   p parser bool "enable parser for grammar"])
 
 (defn value-opt!
   [args option object]
@@ -290,70 +236,74 @@
         (boot/empty-dir! target-dir)
         (util/info "target: %s\n" target-dir-str)
         (util/info "parser: %s\n" parser)
+        (util/info "lexer: %s\n" lexer)
 
-       (when show
-         (util/info "parse options: \n" *opts*))
+        (when show
+         (util/info "parse options: %s\n" *opts*))
 
-       (let [class-loader (DynamicClassLoader.)
-             lexer-class ^Lexer (-> class-loader
-                                   (.loadClass lexer))
-             lexer-ctor (.getConstructor lexer-class CharStream)
-             lexer (.newInstance lexer-ctor nil)
+        (let [class-loader (DynamicClassLoader.)
+              lexer-class ^Lexer (.loadClass class-loader lexer) 
+              lexer-inst (Reflector/invokeConstructor lexer-class 
+                            (into-array CharStream [nil]))
 
-             parser-class ^Parser (-> class-loader
-                                     (.loadClass parser))
-             parser-ctor (.getConstructor lexer-class TokenStream)
-             parser (.newInstance parser-ctor nil)
+              parser-class ^Parser (.loadClass class-loader parser)
+              parser-inst (Reflector/invokeConstructor parser-class 
+                            (into-array  TokenStream [nil]))
 
-             char-set (Charset/defaultCharset)]
+              char-set (Charset/defaultCharset)]
 
-         (doseq [files input]
-           (let [input (first files)
-                 char-stream (-> (Paths/get input)
-                                 (CharStreams/fromPath char-set))
-                 tokens (CommonTokenStream. lexer)]
-              (.setInputStream input)
+          (doseq [file input]
+            (util/info "input: %s & %s\n" 
+              (-> (Paths/get "." (make-array String 0)) 
+                  .toAbsolutePath .normalize .toString)
+              file)
+          
+            (let [char-stream (-> (Paths/get file (make-array String 0))
+                                  (CharStreams/fromPath char-set))
+                  _ (.setInputStream lexer-inst char-stream)
+                  tokens (CommonTokenStream. lexer-inst)]
+              
               (.fill tokens)
 
               (when tokens
                 (util/info "token:  show \n")
                 (doseq [tok (.getTokens tokens)]
                   (if (instance? CommonToken tok)
-                    (util/info "  %s\n" (.toString tok lexer))
+                    (util/info "  %s\n" (.toString tok lexer-inst))
                     (util/info "  %s\n" (.toString tok)))))
 
               (when diagnostics
                 (util/info "enable diagnostics \n")
-                (.addErrorListener parser (DiagnosticErrorListener.))
-                (-> parser
+                (.addErrorListener parser-inst (DiagnosticErrorListener.))
+                (-> parser-inst
                     .getInterpreter
                     (.setPredictionMode PredictionMode/LL_EXACT_AMBIG_DETECTION))
 
-               (when (or print-tree gui postscript)
+               (when (or tree gui postscript)
                  (util/info "enable diagnostics \n")
-                 (.setBuildParseTree parser true))
+                 (.setBuildParseTree parser-inst true))
 
                (when sll
                  (util/info "use SLL \n")
-                 (-> parser
+                 (-> parser-inst
                      .getInterpreter
                      (.setPredictionMode PredictionMode/SLL)))
 
-               (doto parser
+               (doto parser-inst
                  (.setTokenStream tokens)
                  (.setTrace trace))
 
                (try
                  (let [start-rule (.getMethod parser-class start-rule)
-                       tree (.invoke start-rule parser nil)]
-                   (when print-tree
-                     (util/info "print tree \n" (.toStringTree tree parser)))
+                       tree (.invoke start-rule parser-inst nil)]
                    (when tree
+                     (util/info "print tree \n" (.toStringTree tree parser-inst)))
+                   (when gui
                      (util/info "inspect tree \n")
-                     (Trees/inspect tree parser))
+                     (Trees/inspect tree parser-inst))
                    (when postscript
                      (util/info "print tree as postscript \n")
-                     (Trees/save tree parser postscript)))
+                     (Trees/save tree parser-inst postscript)))
                  (catch NoSuchMethodException ex
                         (util/info "no method for rule %s or it has arguements \n"
                                    start-rule))
@@ -361,10 +311,10 @@
                           (util/info "releasing")))))))
 
         ;; prepare fileset and call next-handler
-       (let [fileset' (-> fileset
-                          (boot/add-resource target-dir)
-                          boot/commit!)
-             result (next-handler fileset')]
+        (let [fileset' (-> fileset
+                           (boot/add-resource target-dir)
+                           boot/commit!)
+              result (next-handler fileset')]
         ;; post processing
         ;; the goal here is to perform any side effects
-        result)))))
+          result)))))
