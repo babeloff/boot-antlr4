@@ -294,7 +294,7 @@
        (when show
          (util/info "parse options: \n" *opts*))
 
-       (let [class-loader (.getContextClassLoader (Thread/currentThread))
+       (let [class-loader (DynamicClassLoader.)
              lexer-class ^Lexer (-> class-loader
                                    (.loadClass lexer))
              lexer-ctor (.getConstructor lexer-class CharStream)
