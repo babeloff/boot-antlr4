@@ -49,9 +49,10 @@
   (comp 
     (test-rig :parser "org.antlr.parser.antlr4.ANTLRv4Parser"
               :lexer "org.antlr.parser.antlr4.ANTLRv4Lexer"
-              :start-rule "program"
+              :start-rule "grammarSpec"
               :input ["src/antlr4/ANTLRv4Lexer.g4"]
               :tree true
+              :tokens true
               :show true)))
 
 (deftask my-repl

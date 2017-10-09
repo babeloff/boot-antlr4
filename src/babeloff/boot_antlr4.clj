@@ -204,7 +204,8 @@
 
 
 ;; https://github.com/antlr/antlr4/blob/master/tool/src/org/antlr/v4/gui/TestRig.java
-;; https://github.com/alandipert/boot-java-task-example
+;; this does some fancy stuff ...
+;; dyanmically import classes and runs their constructors.
 (deftask test-rig
   "A task that runs parsers and lexers against samples."
   [p parser         CLASS   str    "parser name"
@@ -261,60 +262,67 @@
             (let [char-stream (-> (Paths/get file (make-array String 0))
                                   (CharStreams/fromPath char-set))
                   _ (.setInputStream lexer-inst char-stream)
-                  tokens (CommonTokenStream. lexer-inst)]
+                  token-stream (CommonTokenStream. lexer-inst)]
               
-              (.fill tokens)
+              (.fill token-stream)
 
               (when tokens
-                (util/info "token:  show \n")
-                (doseq [tok (.getTokens tokens)]
-                  (if (instance? CommonToken tok)
-                    (util/info "  %s\n" (.toString tok lexer-inst))
-                    (util/info "  %s\n" (.toString tok)))))
+                (util/info "tokens enabled \n")
+                (let [out-path (str file ".tokens") 
+                      has-dirs? (io/make-parents out-path)] 
+                  (with-open [wtr (io/writer out-path 
+                                      :encoding "UTF-8"
+                                      :append true)]
+                    (doseq [tok (.getTokens token-stream)]
+                      (.write wtr (str (if (instance? CommonToken tok)
+                                        (.toString tok lexer-inst)
+                                        (.toString tok))
+                                      "\n"))))))
 
               (when diagnostics
                 (util/info "enable diagnostics \n")
                 (.addErrorListener parser-inst (DiagnosticErrorListener.))
                 (-> parser-inst
+                   .getInterpreter
+                   (.setPredictionMode PredictionMode/LL_EXACT_AMBIG_DETECTION)))
+
+              (when (or tree gui postscript)
+                (util/info "enable parse tree \n")
+                (.setBuildParseTree parser-inst true))
+
+              (when sll
+                (util/info "use SLL \n")
+                (-> parser-inst
                     .getInterpreter
-                    (.setPredictionMode PredictionMode/LL_EXACT_AMBIG_DETECTION))
+                    (.setPredictionMode PredictionMode/SLL)))
 
-               (when (or tree gui postscript)
-                 (util/info "enable diagnostics \n")
-                 (.setBuildParseTree parser-inst true))
+              (doto parser-inst
+                (.setTokenStream token-stream))
+                ;;(.setTrace trace))
 
-               (when sll
-                 (util/info "use SLL \n")
-                 (-> parser-inst
-                     .getInterpreter
-                     (.setPredictionMode PredictionMode/SLL)))
-
-               (doto parser-inst
-                 (.setTokenStream tokens)
-                 (.setTrace trace))
-
-               (try
-                 (let [start-rule (.getMethod parser-class start-rule)
-                       tree (.invoke start-rule parser-inst nil)]
-                   (when tree
-                     (util/info "print tree \n" (.toStringTree tree parser-inst)))
-                   (when gui
-                     (util/info "inspect tree \n")
-                     (Trees/inspect tree parser-inst))
-                   (when postscript
-                     (util/info "print tree as postscript \n")
-                     (Trees/save tree parser-inst postscript)))
-                 (catch NoSuchMethodException ex
-                        (util/info "no method for rule %s or it has arguements \n"
-                                   start-rule))
-                 (finally
-                          (util/info "releasing")))))))
-
+              ;; https://github.com/clojure/clojure/blob/master/src/jvm/clojure/lang/Reflector.java#L319
+              (try
+                (let [parse-tree (Reflector/invokeInstanceMember 
+                                    parser-inst start-rule)]
+                  (when tree
+                    (util/info "print tree \n" (.toStringTree parse-tree parser-inst)))
+                  (when gui
+                    (util/info "inspect tree \n")
+                    (Trees/inspect parse-tree parser-inst))
+                  (when postscript
+                    (util/info "print tree as postscript \n")
+                    (Trees/save parse-tree parser-inst postscript)))
+                (catch NoSuchMethodException ex
+                       (util/info "no method for rule %s or it has arguements \n"
+                                  start-rule))
+                (finally
+                         (util/info "releasing"))))))
+                         
         ;; prepare fileset and call next-handler
-        (let [fileset' (-> fileset
-                           (boot/add-resource target-dir)
-                           boot/commit!)
-              result (next-handler fileset')]
+       (let [fileset' (-> fileset
+                          (boot/add-resource target-dir)
+                          boot/commit!)
+             result (next-handler fileset')]
         ;; post processing
         ;; the goal here is to perform any side effects
-          result)))))
+        result)))))
