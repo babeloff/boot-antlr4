@@ -3,7 +3,7 @@
 (def version "0.1.0-SNAPSHOT")
 
 (set-env!
-    :source-paths #{"src/antlr4" "src/java"}
+    :source-paths #{"src/antlr4" "src/java" "src/clj"}
     :dependencies '[[org.clojure/clojure "1.9.0-beta1"]
                     [boot/core "RELEASE" :scope "test"]
                     [babeloff/boot-antlr4 "0.1.0-SNAPSHOT"]
@@ -38,10 +38,9 @@
             :package "org.antlr.parser.antlr4"
             :show true)
     (javac)
-    ;(test-rig :parser "AqlParser"
-    ;          :lexer "AqlLexerRules"
-    ;          :start-rule "program"
-    ;          :show true)
+    (test-rig :loader-ns "ANTLRv4"
+              :start-rule "program"
+              :show true)
     (target :dir #{"target"})))
 
 (deftask my-repl
