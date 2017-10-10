@@ -36,7 +36,6 @@
 (deftask build
   [s show bool "show the arguments"]
   (comp
-    ;;(watch)
     (antlr4 :grammar "ANTLRv4Lexer.g4"
             :package "org.antlr.parser.antlr4"
             :show true)
@@ -51,7 +50,8 @@
     (test-rig :parser "org.antlr.parser.antlr4.ANTLRv4Parser"
               :lexer "org.antlr.parser.antlr4.ANTLRv4Lexer"
               :start-rule "grammarSpec"
-              :input ["src/antlr4/ANTLRv4Lexer.g4"]
+              :input ["src/antlr4/ANTLRv4Lexer.g4"
+                      "src/antlr4/ANTLRv4Parser.g4"]
               :tree true
               :tokens true
               :show true)))
@@ -63,13 +63,8 @@
 (deftask live 
   []
   (comp ;(watch) 
-    (build) (exercise) (show :fileset true) (store)))
-
-(deftask options
-  "Demonstrate the task options DSL."
-  [a a-option VAL  kw    "The option."
-   c counter       int   "The counter."
-   e entry    VAL  sym   "An entrypoint symbol."
-   f flag          bool  "Enable flag."
-   o o-option VAL  str   "The other option."]
-  (util/info  *opts*))
+    (build)
+    (exercise) 
+    ;; (show :fileset true) 
+    (store)))
+ 

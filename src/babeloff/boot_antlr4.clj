@@ -172,7 +172,7 @@
       s 
       (let [sb (transient [s])]
         (conj! sb count)
-        (doseq [ix (range 0 (- count 1) 1)]
+        (doseq [ix (range 0 count 1)]
           (conj! sb (to-string-tree (.getChild tree ix) rules-list)))
         (persistent! sb)))))
                              
