@@ -53,6 +53,7 @@
               :input ["src/antlr4/ANTLRv4Lexer.g4"
                       "src/antlr4/ANTLRv4Parser.g4"]
               :tree true
+              :postscript true
               :tokens true
               :show true)))
 

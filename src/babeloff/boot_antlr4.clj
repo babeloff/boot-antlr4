@@ -290,13 +290,13 @@
   [p parser         CLASS   str    "parser name"
    l lexer          CLASS   str    "lexer name"
    r start-rule     LIB_DIR str    "the name of the first rule to match"
-   z postscript     CODE    str    "produce a postscript output of the parse tree"
    e encoding       STYLE   str    "specify output STYLE for messages in antlr, gnu, vs2005"
    i input          OPT     [str]  "the file name of the input to parse"
    s show                   bool   "show the constructed properties"
    a tokens                 bool   "produce the annotated token stream"
    t tree                   bool   "produce the annotated parse tree"
    v gui                    bool   "produce the parse tree as a window"
+   z postscript             bool   "produce a postscript output of the parse tree"   
    x trace                  bool   "show the progress that the parser makes"
    d diagnostics            bool   "show some diagnostics"
    f sll                    bool   "use the fast SLL prediction mode"]
@@ -384,6 +384,7 @@
               (let [parse-tree (Reflector/invokeInstanceMember
                                   parser-inst start-rule)]
                 (when tree
+                  (util/info "write parse tree \n")
                   (let [out-path (io/file target-dir (str file ".tree_stream"))
                         has-dirs? (io/make-parents out-path)
                         rules-list (get-rules-list parser-inst)
@@ -395,11 +396,14 @@
                         (pp/pprint edn-tree wtr))))
 
                 (when gui
-                    (util/info "inspect tree \n")
+                  (util/info "inspect parse tree \n")
                   (org.antlr.v4.gui.Trees/inspect parse-tree parser-inst))
                 (when postscript
-                  (util/info "print tree as postscript \n")
-                  (org.antlr.v4.gui.Trees/save parse-tree parser-inst postscript)))
+                  (util/info "write postscript as parse tree \n")
+                  (let [out-path (io/file target-dir (str file ".ps"))
+                        has-dirs? (io/make-parents out-path)] 
+                    (org.antlr.v4.gui.Trees/save 
+                          parse-tree parser-inst (.getAbsolutePath out-path)))))
               (catch NoSuchMethodException ex
                     (util/info "no method for rule %s or it has arguements \n"
                                 start-rule))
