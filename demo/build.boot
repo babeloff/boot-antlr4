@@ -3,8 +3,8 @@
 (def version "0.1.0-SNAPSHOT")
 
 (set-env!
-    :source-paths #{"src/antlr4" "src/java" "src/clj"}
-    :dependencies '[[org.clojure/clojure "1.9.0-beta1"]
+    :source-paths #{"src/antlr4" "src/java"}
+    :dependencies '[[org.clojure/clojure "1.9.0-beta2"]
                     [boot/core "RELEASE" :scope "test"]
                     [babeloff/boot-antlr4 "0.1.0-SNAPSHOT"]
                     [org.antlr/antlr4 "4.7"]
@@ -23,9 +23,15 @@
 
 
 ;; (import '(org.antlr.v4.gui TestRig))
-(require '[babeloff.boot-antlr4 :as antlr :refer [antlr4 test-rig]])
-(import '(org.antlr.v4 Tool))
+(require '[babeloff.boot-antlr4 :as antlr :refer [antlr4 test-rig]]
+         '(boot [core :as boot :refer [deftask]]
+                [util :as util]
+                [task-helpers :as helper]))
 
+(deftask store
+  [s show bool "show the arguments"]
+  (comp
+    (target :dir #{"target"})))
 
 (deftask build
   [s show bool "show the arguments"]
@@ -37,12 +43,33 @@
     (antlr4 :grammar "ANTLRv4Parser.g4"
             :package "org.antlr.parser.antlr4"
             :show true)
-    (javac)
-    (test-rig :loader-ns "ANTLRv4"
-              :start-rule "program"
-              :show true)
-    (target :dir #{"target"})))
+    (javac)))
+
+(deftask exercise
+  [s show bool "show the arguments"]
+  (comp 
+    (test-rig :parser "org.antlr.parser.antlr4.ANTLRv4Parser"
+              :lexer "org.antlr.parser.antlr4.ANTLRv4Lexer"
+              :start-rule "grammarSpec"
+              :input ["src/antlr4/ANTLRv4Lexer.g4"]
+              :tree true
+              :tokens true
+              :show true)))
 
 (deftask my-repl
   []
-  (comp (repl) (build)))
+  (comp (repl) (build) (store)))
+
+(deftask live 
+  []
+  (comp ;(watch) 
+    (build) (exercise) (show :fileset true) (store)))
+
+(deftask options
+  "Demonstrate the task options DSL."
+  [a a-option VAL  kw    "The option."
+   c counter       int   "The counter."
+   e entry    VAL  sym   "An entrypoint symbol."
+   f flag          bool  "Enable flag."
+   o o-option VAL  str   "The other option."]
+  (util/info  *opts*))
