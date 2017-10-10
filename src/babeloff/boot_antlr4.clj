@@ -4,7 +4,8 @@
   (:require (boot [core :as boot :refer [deftask]]
                   [util :as util]
                   [task-helpers :as helper])
-            (clojure [pprint :as pp])
+            (clojure [pprint :as pp]
+                     [edn :as edn])
             (clojure.java [io :as io]
                           [classpath :as cp]))
   (:import (clojure.lang DynamicClassLoader
@@ -13,17 +14,19 @@
            (org.antlr.v4.tool LexerGrammar
                               Grammar)
            (org.antlr.v4.parse ANTLRParser)
-           (org.antlr.v4.runtime CharStream CharStreams
+           (org.antlr.v4.runtime RuleContext
+                                 CharStream CharStreams
                                  CommonToken CommonTokenStream
                                  DiagnosticErrorListener
-                                 Lexer Parser 
-                                 Token TokenStream)
+                                 Lexer Parser
+                                 Token TokenStream)                     
            (org.antlr.v4.runtime.atn PredictionMode)
+           (org.antlr.v4.runtime.tree.Trees)
            (org.antlr.v4.runtime.tree ParseTree)
-           (org.antlr.v4.gui Trees)
            (java.nio.file Paths)
            (java.nio.charset Charset)
            (java.io IOException)
+           (org.antlr.v4.gui.Trees)
            (java.lang.reflect Constructor
                               InvocationTargetException
                               Method)
@@ -82,8 +85,6 @@
 
     (.parse parser (.index (.getRule parser-grammar startRule)))))
 
-(defn print-tree [tree parser]
-    (pp/pprint (.toStringTree tree parser)))
 
 (deftask antlr4-interpreter
   "A task that returns a parser for a grammar.
@@ -149,7 +150,32 @@
       (recur (rest arr)
              (-> builder
                  (.append " ")
-                 (.append (first arr)))))));
+                 (.append (first arr)))))))
+
+
+;;  Imitate the behavior of 
+;;    https://github.com/antlr/antlr4/blob/master/runtime/Java/src/org/antlr/v4/runtime/RuleContext.java
+;;    https://github.com/antlr/antlr4/blob/master/runtime/Java/src/org/antlr/v4/runtime/tree/Trees.java
+;;
+;;   recursively build an array tree of nodes and their values.
+(defn get-rules-list
+  [parser]
+  (let [rules (when parser (.getRuleNames parser))
+        rules-list (when rules (java.util.Arrays/asList rules))]
+    rules-list))
+
+(defn to-string-tree
+  [tree rules-list]
+  (let [s (org.antlr.v4.runtime.tree.Trees/getNodeText tree rules-list)
+        count (.getChildCount tree)]
+    (if (> 1 count)
+      s 
+      (let [sb (transient [s])]
+        (conj! sb count)
+        (doseq [ix (range 0 (- count 1) 1)]
+          (conj! sb (to-string-tree (.getChild tree ix) rules-list)))
+        (persistent! sb)))))
+                             
 
 ;; https://github.com/antlr/antlr4/blob/master/tool/src/org/antlr/v4/Tool.java
 (defn run-antlr4!
@@ -295,87 +321,96 @@
        (when show
          (util/info "parse options: %s\n" *opts*))
 
-        (let [class-loader (DynamicClassLoader.)
-              lexer-class ^Lexer (.loadClass class-loader lexer) 
-              lexer-inst (Reflector/invokeConstructor lexer-class 
-                            (into-array CharStream [nil]))
+       (let [class-loader (DynamicClassLoader.)
+             lexer-class ^Lexer (.loadClass class-loader lexer)
+             lexer-inst (Reflector/invokeConstructor lexer-class
+                           (into-array CharStream [nil]))
 
-              parser-class ^Parser (.loadClass class-loader parser)
-              parser-inst (Reflector/invokeConstructor parser-class 
-                            (into-array  TokenStream [nil]))
+             parser-class ^Parser (.loadClass class-loader parser)
+             parser-inst (Reflector/invokeConstructor parser-class
+                           (into-array  TokenStream [nil]))
 
              char-set (Charset/defaultCharset)]
 
-          (doseq [file input]
-            (util/info "input: %s & %s\n" 
-              (-> (Paths/get "." (make-array String 0)) 
-                  .toAbsolutePath .normalize .toString)
-              file)
-          
-            (let [char-stream (-> (Paths/get file (make-array String 0))
-                                 (CharStreams/fromPath char-set))
-                  _ (.setInputStream lexer-inst char-stream)
-                  token-stream (CommonTokenStream. lexer-inst)]
-              
-              (.fill token-stream)
+         (doseq [file input]
+           (util/info "input: %s & %s\n"
+             (-> (Paths/get "." (make-array String 0))
+                 .toAbsolutePath .normalize .toString)
+             file)
 
-              (when tokens
-                (util/info "tokens enabled \n")
-                (let [out-path (str file ".tokens") 
-                      has-dirs? (io/make-parents out-path)] 
-                  (with-open [wtr (io/writer out-path 
-                                      :encoding "UTF-8"
-                                      :append true)]
-                    (doseq [tok (.getTokens token-stream)]
-                      (.write wtr (str (if (instance? CommonToken tok)
-                                        (.toString tok lexer-inst)
-                                        (.toString tok))
-                                      "\n"))))))
+           (let [char-stream (-> (Paths/get file (make-array String 0))
+                                (CharStreams/fromPath char-set))
+                 _ (.setInputStream lexer-inst char-stream)
+                 token-stream (CommonTokenStream. lexer-inst)]
 
-              (when diagnostics
-                (util/info "enable diagnostics \n")
-                (.addErrorListener parser-inst (DiagnosticErrorListener.))
-                (-> parser-inst
-                    .getInterpreter
+             (.fill token-stream)
+
+             (when tokens
+               (util/info "tokens enabled \n")
+               (let [out-path (io/file target-dir (str file ".token_stream"))
+                     has-dirs? (io/make-parents out-path)]
+                 (with-open [wtr (io/writer out-path
+                                     :encoding "UTF-8"
+                                     :append true)]
+                   (doseq [tok (.getTokens token-stream)]
+                     (.write wtr (str (if (instance? CommonToken tok)
+                                       (.toString tok lexer-inst)
+                                       (.toString tok))
+                                     "\n"))))))
+
+             (when diagnostics
+               (util/info "enable diagnostics \n")
+               (.addErrorListener parser-inst (DiagnosticErrorListener.))
+               (-> parser-inst
+                   .getInterpreter
                    (.setPredictionMode PredictionMode/LL_EXACT_AMBIG_DETECTION)))
 
-              (when (or tree gui postscript)
-                (util/info "enable parse tree \n")
-                (.setBuildParseTree parser-inst true))
+             (when (or tree gui postscript)
+               (util/info "enable parse tree \n")
+               (.setBuildParseTree parser-inst true))
 
-               (when sll
-                 (util/info "use SLL \n")
-                (-> parser-inst
-                     .getInterpreter
-                     (.setPredictionMode PredictionMode/SLL)))
+             (when sll
+               (util/info "use SLL \n")
+              (-> parser-inst
+                   .getInterpreter
+                   (.setPredictionMode PredictionMode/SLL)))
 
-              (doto parser-inst
-                (.setTokenStream token-stream))
+             (doto parser-inst
+               (.setTokenStream token-stream))
                 ;;(.setTrace trace))
 
               ;; https://github.com/clojure/clojure/blob/master/src/jvm/clojure/lang/Reflector.java#L319
-               (try
-                (let [parse-tree (Reflector/invokeInstanceMember 
-                                    parser-inst start-rule)]
-                   (when tree
-                    (util/info "print tree \n" (.toStringTree parse-tree parser-inst)))
-                  (when gui
-                     (util/info "inspect tree \n")
-                    (Trees/inspect parse-tree parser-inst))
-                   (when postscript
-                     (util/info "print tree as postscript \n")
-                    (Trees/save parse-tree parser-inst postscript)))
-                 (catch NoSuchMethodException ex
-                        (util/info "no method for rule %s or it has arguements \n"
-                                   start-rule))
-                 (finally
-                         (util/info "releasing"))))))
+             (try
+              (let [parse-tree (Reflector/invokeInstanceMember
+                                  parser-inst start-rule)]
+                (when tree
+                  (let [out-path (io/file target-dir (str file ".tree_stream"))
+                        has-dirs? (io/make-parents out-path)
+                        rules-list (get-rules-list parser-inst)
+                        edn-tree (to-string-tree parse-tree rules-list)]
+                    (with-open [wtr (io/writer out-path
+                                        :encoding "UTF-8"
+                                        :append true)]
+                        (pp/pprint rules-list wtr)
+                        (pp/pprint edn-tree wtr))))
 
-        ;; prepare fileset and call next-handler
+                (when gui
+                    (util/info "inspect tree \n")
+                  (org.antlr.v4.gui.Trees/inspect parse-tree parser-inst))
+                (when postscript
+                  (util/info "print tree as postscript \n")
+                  (org.antlr.v4.gui.Trees/save parse-tree parser-inst postscript)))
+              (catch NoSuchMethodException ex
+                    (util/info "no method for rule %s or it has arguements \n"
+                                start-rule))
+              (finally
+                      (util/info "releasing"))))))
+
+          ;; prepare fileset and call next-handler
        (let [fileset' (-> fileset
-                          (boot/add-resource target-dir)
-                          boot/commit!)
+                           (boot/add-asset target-dir)
+                           boot/commit!)
              result (next-handler fileset')]
-        ;; post processing
-        ;; the goal here is to perform any side effects
-        result)))))
+         ;; post processing
+         ;; the goal here is to perform any side effects
+         result)))))
