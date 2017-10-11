@@ -6,7 +6,7 @@
     :source-paths #{"src/antlr4" "src/java"}
     :dependencies '[[org.clojure/clojure "1.9.0-beta2"]
                     [boot/core "RELEASE" :scope "test"]
-                    [babeloff/boot-antlr4 "0.1.0-SNAPSHOT"]
+                    [babeloff/boot-antlr4 "0.1.0"]
                     [org.antlr/antlr4 "4.7"]
                     [clj-jgit "0.8.10"]])
 

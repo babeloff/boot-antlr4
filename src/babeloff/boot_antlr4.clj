@@ -384,7 +384,7 @@
               (let [parse-tree (Reflector/invokeInstanceMember
                                   parser-inst start-rule)]
                 (when tree
-                  (util/info "write parse tree \n")
+                  (util/info "write parse tree as EDN\n")
                   (let [out-path (io/file target-dir (str file ".tree_stream"))
                         has-dirs? (io/make-parents out-path)
                         rules-list (get-rules-list parser-inst)
@@ -396,7 +396,7 @@
                         (pp/pprint edn-tree wtr))))
 
                 (when postscript
-                  (util/info "write postscript as parse tree \n")
+                  (util/info "write parse tree as postscript\n")
                   (let [out-path (io/file target-dir (str file ".ps"))
                         has-dirs? (io/make-parents out-path)] 
                     (org.antlr.v4.gui.Trees/save 
