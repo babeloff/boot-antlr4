@@ -285,6 +285,7 @@
 ;; https://github.com/antlr/antlr4/blob/master/tool/src/org/antlr/v4/gui/TestRig.java
 ;; this does some fancy stuff ...
 ;; dyanmically import classes and runs their constructors.
+;; the gui option from TestRig is not supported.
 (deftask test-rig
   "A task that runs parsers and lexers against samples."
   [p parser         CLASS   str    "parser name"
@@ -294,8 +295,7 @@
    i input          OPT     [str]  "the file name of the input to parse"
    s show                   bool   "show the constructed properties"
    a tokens                 bool   "produce the annotated token stream"
-   t tree                   bool   "produce the annotated parse tree"
-   v gui                    bool   "produce the parse tree as a window"
+   t tree                   bool   "produce the annotated parse tree" 
    z postscript             bool   "produce a postscript output of the parse tree"   
    x trace                  bool   "show the progress that the parser makes"
    d diagnostics            bool   "show some diagnostics"
@@ -365,7 +365,7 @@
                    .getInterpreter
                    (.setPredictionMode PredictionMode/LL_EXACT_AMBIG_DETECTION)))
 
-             (when (or tree gui postscript)
+             (when (or tree postscript)
                (util/info "enable parse tree \n")
                (.setBuildParseTree parser-inst true))
 
@@ -395,15 +395,13 @@
                         (pp/pprint rules-list wtr)
                         (pp/pprint edn-tree wtr))))
 
-                (when gui
-                  (util/info "inspect parse tree \n")
-                  (org.antlr.v4.gui.Trees/inspect parse-tree parser-inst))
                 (when postscript
                   (util/info "write postscript as parse tree \n")
                   (let [out-path (io/file target-dir (str file ".ps"))
                         has-dirs? (io/make-parents out-path)] 
                     (org.antlr.v4.gui.Trees/save 
                           parse-tree parser-inst (.getAbsolutePath out-path)))))
+                          
               (catch NoSuchMethodException ex
                     (util/info "no method for rule %s or it has arguements \n"
                                 start-rule))
