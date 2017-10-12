@@ -25,9 +25,8 @@
          '[adzerk.bootlaces :refer [bootlaces! 
                                     build-jar 
                                     push-snapshot 
-                                    push-release]]
-         '[babeloff.boot-antlr4 :refer [antlr4]])
-(bootlaces!)
+                                    push-release]])
+(bootlaces! "2017-10-11")
 
 
 (deftask build
@@ -36,6 +35,8 @@
   (comp (pom) (jar) (install)))
 
 (deftask deploy-release 
+  "release to clojars"
+  []
   (comp 
     (build-jar)
     (push-release)))
