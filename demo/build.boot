@@ -63,7 +63,8 @@
 
 (deftask live 
   []
-  (comp ;(watch) 
+  (comp 
+    (watch) 
     (build)
     (exercise) 
     ;; (show :fileset true) 
