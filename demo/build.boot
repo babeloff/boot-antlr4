@@ -8,7 +8,9 @@
                     [boot/core "RELEASE" :scope "test"]
                     [babeloff/boot-antlr4 "0.1.0"]
                     [org.antlr/antlr4 "4.7"]
-                    [clj-jgit "0.8.10"]])
+                    [clj-jgit "0.8.10"]
+                    [byte-streams "0.2.3"]
+                    [me.raynes/fs "1.4.6"]])
 
 (task-options!
  pom {:project     project
@@ -39,7 +41,7 @@
     (antlr4 :grammar "ANTLRv4Lexer.g4"
             :package "org.antlr.parser.antlr4"
             :show true)
-    (antlr4 :grammar "ANTLRv4Parser.g4"
+    (antlr4 :grammar "ANTLRv4LiterateParser.g4"
             :package "org.antlr.parser.antlr4"
             :show true)
     (javac)))
@@ -47,9 +49,9 @@
 (deftask exercise
   [s show bool "show the arguments"]
   (comp 
-    (test-rig :parser "org.antlr.parser.antlr4.ANTLRv4Parser"
+    (test-rig :parser "org.antlr.parser.antlr4.ANTLRv4LiterateParser"
               :lexer "org.antlr.parser.antlr4.ANTLRv4Lexer"
-              :start-rule "grammarSpec"
+              :start-rule "literaryGrammarSpec"
               :input ["src/antlr4/ANTLRv4Lexer.g4"
                       "src/antlr4/ANTLRv4Parser.g4"]
               :tree true
@@ -59,7 +61,7 @@
 
 (deftask my-repl
   []
-  (comp (repl) (build) (store)))
+  (comp (build) (show :fileset true) (exercise) (repl) (store)))
 
 (deftask live 
   []

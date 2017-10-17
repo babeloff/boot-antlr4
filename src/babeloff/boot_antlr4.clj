@@ -5,11 +5,15 @@
                   [util :as util]
                   [task-helpers :as helper])
             (clojure [pprint :as pp]
-                     [edn :as edn])
+                     [edn :as edn] 
+                     [reflect :as reflect]
+                     [string :as string])
             (clojure.java [io :as io]
-                          [classpath :as cp]))
+                          [classpath :as cp])
+            (me.raynes [fs :as fs]))
   (:import (clojure.lang DynamicClassLoader
                          Reflector)
+           (clojure.asm ClassReader)
            (org.antlr.v4 Tool)
            (org.antlr.v4.tool LexerGrammar
                               Grammar)
@@ -233,7 +237,44 @@
 ;;(deftesttask antlr4-tests []
 ;;  (comp (antlr4 :grammar "AqlCommentTest.g4" :show 5)
 ;;        (to-asset-invert-tests))))
+(defn file->bytes [file]
+  (with-open [xin (io/input-stream file)
+              xout (java.io.ByteArrayOutputStream.)]
+    (when xin 
+      (io/copy xin xout)
+      (.toByteArray xout))))
+  
+(defn define-class 
+ [class-loader class-name class-path]
+ ;; (if (.findInMemoryClass class-loader class-name)
+ (try
+    (let [class-bytes (file->bytes class-path)]
+     (when class-bytes
+       (.defineClass class-loader class-name class-bytes ""))) 
+    (catch java.lang.LinkageError ex 
+      (util/info "already loaded: %s \n" class-name)
+      "")))
 
+(defn class-path->name
+  [path] 
+  (let [package (drop-last (fs/split path)) 
+        name (fs/base-name path ".class")]
+    ;; (util/info "path name: %s %s %s\n" path (doall package) name)
+    (string/join "." (concat package [name]))))
+ 
+(defn define-class-family 
+  "dynamically load the class and its internal classes
+   using the provided class loader.
+   In its current form the class-name is ignored."
+  [fileset class-loader class-name]
+  (let [in-file-s (boot/input-files fileset)
+        class-file-s (boot/by-ext [".class"] in-file-s)]
+    (doseq [in class-file-s] 
+      (let [class-file (boot/tmp-file in) 
+            class-path (boot/tmp-path in)
+            class-name (class-path->name class-path)]
+        (util/info "load class: %s & %s\n" class-name class-path)
+        (define-class class-loader class-name class-file)))))
 
 ;; https://github.com/antlr/antlr4/blob/master/tool/src/org/antlr/v4/gui/TestRig.java
 ;; this does some fancy stuff ...
@@ -275,10 +316,12 @@
          (util/info "parse options: %s\n" *opts*))
 
        (let [class-loader (DynamicClassLoader.)
+             _ (define-class-family fileset class-loader parser)
+
              lexer-class ^Lexer (.loadClass class-loader lexer)
              lexer-inst (Reflector/invokeConstructor lexer-class
                            (into-array CharStream [nil]))
-
+    
              parser-class ^Parser (.loadClass class-loader parser)
              parser-inst (Reflector/invokeConstructor parser-class
                            (into-array  TokenStream [nil]))
