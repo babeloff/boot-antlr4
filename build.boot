@@ -1,5 +1,5 @@
 (def project 'babeloff/boot-antlr4)
-(def version "0.1.0")
+(def version "2017.10.19")
 
 (set-env! :resource-paths #{"resources" "src"}
           :source-paths   #{"test"}
@@ -15,18 +15,18 @@
  pom {:project     project
       :version     version
       :description "boot tasks for working with ANTLR4"
-      :url         "http://example/FIXME"
+      :url         "https://github.com/babeloff/boot-antlr4/wiki"
       :scm         {:url "https://github.com/babeloff/antlr4"}
       :license     {"Eclipse Public License"
                     "http://www.eclipse.org/legal/epl-v10.html"}})
 
 
 (require '[adzerk.boot-test :refer [test]]
-         '[adzerk.bootlaces :refer [bootlaces! 
-                                    build-jar 
-                                    push-snapshot 
+         '[adzerk.bootlaces :refer [bootlaces!
+                                    build-jar
+                                    push-snapshot
                                     push-release]])
-(bootlaces! "2017-10-11")
+(bootlaces! version)
 
 
 (deftask build
@@ -34,9 +34,9 @@
   []
   (comp (pom) (jar) (install)))
 
-(deftask deploy-release 
+(deftask deploy-release
   "release to clojars"
   []
-  (comp 
+  (comp
     (build-jar)
     (push-release)))

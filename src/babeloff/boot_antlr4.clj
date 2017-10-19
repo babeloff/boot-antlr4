@@ -5,7 +5,7 @@
                   [util :as util]
                   [task-helpers :as helper])
             (clojure [pprint :as pp]
-                     [edn :as edn] 
+                     [edn :as edn]
                      [reflect :as reflect]
                      [string :as string])
             (clojure.java [io :as io]
@@ -23,7 +23,7 @@
                                  CommonToken CommonTokenStream
                                  DiagnosticErrorListener
                                  Lexer Parser
-                                 Token TokenStream)                     
+                                 Token TokenStream)
            (org.antlr.v4.runtime.atn PredictionMode)
            (org.antlr.v4.runtime.tree.Trees)
            (org.antlr.v4.runtime.tree ParseTree)
@@ -110,7 +110,7 @@
                  (.append (first arr)))))))
 
 
-;;  Imitate the behavior of 
+;;  Imitate the behavior of
 ;;    https://github.com/antlr/antlr4/blob/master/runtime/Java/src/org/antlr/v4/runtime/RuleContext.java
 ;;    https://github.com/antlr/antlr4/blob/master/runtime/Java/src/org/antlr/v4/runtime/tree/Trees.java
 ;;
@@ -126,13 +126,13 @@
   (let [s (org.antlr.v4.runtime.tree.Trees/getNodeText tree rules-list)
         count (.getChildCount tree)]
     (if (> 1 count)
-      s 
-      (let [sb (transient [s])]
-        (conj! sb count)
+      s
+      (let [sb (transient [(keyword s)])]
+        ;; (conj! sb count)
         (doseq [ix (range 0 count 1)]
           (conj! sb (to-string-tree (.getChild tree ix) rules-list)))
         (persistent! sb)))))
-                             
+
 
 ;; https://github.com/antlr/antlr4/blob/master/tool/src/org/antlr/v4/Tool.java
 (defn run-antlr4!
@@ -240,41 +240,46 @@
 (defn file->bytes [file]
   (with-open [xin (io/input-stream file)
               xout (java.io.ByteArrayOutputStream.)]
-    (when xin 
+    (when xin
       (io/copy xin xout)
       (.toByteArray xout))))
-  
-(defn define-class 
+
+(defn define-class
  [class-loader class-name class-path]
  ;; (if (.findInMemoryClass class-loader class-name)
  (try
     (let [class-bytes (file->bytes class-path)]
      (when class-bytes
-       (.defineClass class-loader class-name class-bytes ""))) 
-    (catch java.lang.LinkageError ex 
+       (.defineClass class-loader class-name class-bytes "")))
+    (catch java.lang.LinkageError ex
       (util/info "already loaded: %s \n" class-name)
       "")))
 
 (defn class-path->name
-  [path] 
-  (let [package (drop-last (fs/split path)) 
+  [path]
+  (let [package (drop-last (fs/split path))
         name (fs/base-name path ".class")]
     ;; (util/info "path name: %s %s %s\n" path (doall package) name)
     (string/join "." (concat package [name]))))
- 
-(defn define-class-family 
+
+(defn define-class-family
   "dynamically load the class and its internal classes
    using the provided class loader.
    In its current form the class-name is ignored."
   [fileset class-loader class-name]
   (let [in-file-s (boot/input-files fileset)
         class-file-s (boot/by-ext [".class"] in-file-s)]
-    (doseq [in class-file-s] 
-      (let [class-file (boot/tmp-file in) 
+    (doseq [in class-file-s]
+      (let [class-file (boot/tmp-file in)
             class-path (boot/tmp-path in)
             class-name (class-path->name class-path)]
-        (util/info "load class: %s & %s\n" class-name class-path)
+        ; (util/info "load class: %s & %s\n" class-name class-path)
         (define-class class-loader class-name class-file)))))
+
+(defn get-target-path
+  [file-path]
+  (->> (fs/split file-path)
+       (map #(case % ".." "dots" "." "dot" %))))
 
 ;; https://github.com/antlr/antlr4/blob/master/tool/src/org/antlr/v4/gui/TestRig.java
 ;; this does some fancy stuff ...
@@ -289,8 +294,8 @@
    i input          OPT     [str]  "the file name of the input to parse"
    s show                   bool   "show the constructed properties"
    a tokens                 bool   "produce the annotated token stream"
-   t tree                   bool   "produce the annotated parse tree" 
-   z postscript             bool   "produce a postscript output of the parse tree"   
+   t tree                   bool   "produce the annotated parse tree"
+   z postscript             bool   "produce a postscript output of the parse tree"
    x trace                  bool   "show the progress that the parser makes"
    d diagnostics            bool   "show some diagnostics"
    f sll                    bool   "use the fast SLL prediction mode"]
@@ -311,6 +316,9 @@
         (util/info "target: %s\n" target-dir-str)
         (util/info "parser: %s\n" parser)
         (util/info "lexer: %s\n" lexer)
+        (util/info "working directory: %s\n"
+          (-> (Paths/get "." (make-array String 0))
+             .toAbsolutePath .normalize .toString))
 
        (when show
          (util/info "parse options: %s\n" *opts*))
@@ -320,30 +328,30 @@
 
              lexer-class ^Lexer (.loadClass class-loader lexer)
              lexer-inst (Reflector/invokeConstructor lexer-class
-                           (into-array CharStream [nil]))
-    
+                                 (into-array CharStream [nil]))
+
              parser-class ^Parser (.loadClass class-loader parser)
              parser-inst (Reflector/invokeConstructor parser-class
                            (into-array  TokenStream [nil]))
 
              char-set (Charset/defaultCharset)]
 
-         (doseq [file input]
-           (util/info "input: %s & %s\n"
-             (-> (Paths/get "." (make-array String 0))
-                 .toAbsolutePath .normalize .toString)
-             file)
+         (doseq [file-path input]
+           (util/info "input: %s\n" file-path)
 
-           (let [char-stream (-> (Paths/get file (make-array String 0))
-                                (CharStreams/fromPath char-set))
+           (let [tgt-file-path (apply io/file target-dir (get-target-path file-path))
+                 src-file (Paths/get file-path (make-array String 0))
+                 char-stream (CharStreams/fromPath src-file char-set)
                  _ (.setInputStream lexer-inst char-stream)
                  token-stream (CommonTokenStream. lexer-inst)]
 
+             (util/info "preparing token stream\n" file-path)
              (.fill token-stream)
 
+             (util/info "token stream filled\n" file-path)
              (when tokens
                (util/info "tokens enabled \n")
-               (let [out-path (io/file target-dir (str file ".token_stream"))
+               (let [out-path (io/file tgt-file-path "token.txt")
                      has-dirs? (io/make-parents out-path)]
                  (with-open [wtr (io/writer out-path
                                      :encoding "UTF-8"
@@ -381,28 +389,28 @@
                                   parser-inst start-rule)]
                 (when tree
                   (util/info "write parse tree as EDN\n")
-                  (let [out-path (io/file target-dir (str file ".tree_stream"))
+                  (let [out-path (io/file tgt-file-path "tree.edn")
                         has-dirs? (io/make-parents out-path)
                         rules-list (get-rules-list parser-inst)
                         edn-tree (to-string-tree parse-tree rules-list)]
                     (with-open [wtr (io/writer out-path
                                         :encoding "UTF-8"
                                         :append true)]
-                        (pp/pprint rules-list wtr)
+                        ;; (pp/pprint rules-list wtr)
                         (pp/pprint edn-tree wtr))))
 
                 (when postscript
                   (util/info "write parse tree as postscript\n")
-                  (let [out-path (io/file target-dir (str file ".ps"))
-                        has-dirs? (io/make-parents out-path)] 
-                    (org.antlr.v4.gui.Trees/save 
+                  (let [out-path (io/file tgt-file-path "tree.ps")
+                        has-dirs? (io/make-parents out-path)]
+                    (org.antlr.v4.gui.Trees/save
                           parse-tree parser-inst (.getAbsolutePath out-path)))))
-                          
+
               (catch NoSuchMethodException ex
                     (util/info "no method for rule %s or it has arguements \n"
                                 start-rule))
               (finally
-                      (util/info "releasing"))))))
+                      (util/info "releasing %s\n" file-path))))))
 
           ;; prepare fileset and call next-handler
        (let [fileset' (-> fileset
