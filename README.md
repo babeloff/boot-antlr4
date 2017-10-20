@@ -2,6 +2,8 @@
 
 Boot tasks to work with antlr4.
 
+See https://clojars.org/babeloff/boot-antlr4
+
 ## Usage
 
 Anltr4 is a parser and lexer generator.
