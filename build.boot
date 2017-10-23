@@ -1,9 +1,10 @@
 (def project 'babeloff/boot-antlr4)
-(def version "2017.10.19")
+(def version "2017.10.20-SNAPSHOT")
 
 (set-env! :resource-paths #{"resources" "src"}
           :source-paths   #{"test"}
           :dependencies   '[[org.clojure/clojure "RELEASE"]
+                            [org.clojure/spec.alpha "0.1.134"]
                             [boot/core "RELEASE" :scope "test"]
                             [adzerk/boot-test "RELEASE" :scope "test"]
                             ;; https://mvnrepository.com/artifact/org.antlr/antlr4
@@ -34,8 +35,10 @@
   []
   (comp (pom) (jar) (install)))
 
-(deftask deploy-release
-  "release to clojars"
+(deftask release
+  "release to clojars
+  You will be prompted for
+  your clojars user and password."
   []
   (comp
     (build-jar)

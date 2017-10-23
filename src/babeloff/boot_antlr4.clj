@@ -10,6 +10,7 @@
                      [string :as string])
             (clojure.java [io :as io]
                           [classpath :as cp])
+            (clojure.spec [alpha :as s])
             (me.raynes [fs :as fs]))
   (:import (clojure.lang DynamicClassLoader
                          Reflector)
@@ -24,7 +25,8 @@
                                  DiagnosticErrorListener
                                  Lexer Parser
                                  Token TokenStream)
-           (org.antlr.v4.runtime.atn PredictionMode)
+           (org.antlr.v4.runtime.atn PredictionMode
+                                     ATN)
            (org.antlr.v4.runtime.tree.Trees)
            (org.antlr.v4.runtime.tree ParseTree)
            (java.nio.file Paths)
@@ -115,23 +117,118 @@
 ;;    https://github.com/antlr/antlr4/blob/master/runtime/Java/src/org/antlr/v4/runtime/tree/Trees.java
 ;;
 ;;   recursively build an array tree of nodes and their values.
-(defn get-rules-list
-  [parser]
-  (let [rules (when parser (.getRuleNames parser))
-        rules-list (when rules (java.util.Arrays/asList rules))]
-    rules-list))
 
-(defn to-string-tree
-  [tree rules-list]
-  (let [s (org.antlr.v4.runtime.tree.Trees/getNodeText tree rules-list)
-        count (.getChildCount tree)]
+;; https://github.com/antlr/antlr4/blob/master/runtime/Java/src/org/antlr/v4/runtime/tree/Trees.java#L70
+(defn node->string
+  "A naive export of the node to RDF triples."
+  [node rule-list]
+  ;(try)
+  (cond
+    (instance? org.antlr.v4.runtime.RuleContext node)
+    (let [rule-index (.. node (getRuleContext) (getRuleIndex))
+          rule-name (.get rule-list rule-index)
+          alt-number (.. node (getAltNumber))]
+      (if (= alt-number ATN/INVALID_ALT_NUMBER)
+        rule-name
+        (concat rule-name ':' alt-number)))
+
+    (instance? org.antlr.v4.runtime.tree.ErrorNode node)
+    (.. node (toString))
+
+    (instance? org.antlr.v4.runtime.tree.TerminalNode node)
+    (let [symbol (.. node (getSymbol))]
+      (if (nil? symbol)
+        (.. symbol (getText))
+        (let [payload (.. node (getPayload))]
+          (if (instance? org.antlr.v4.runtime.Token payload)
+            (.. payload (getText))
+            (.. payload (toString))))))
+
+    :else
+    (let [payload (.. node (getPayload))]
+      (if (instance? org.antlr.v4.runtime.Token payload)
+        (.. payload (getText))
+        (.. payload (toString))))))
+
+    ;(catch java.lang.IllegalArgumentException ex
+    ;  (if  (and (s/valid? ::node node))
+    ;    (util/warn "exception: %s \n"
+    ;      (with-err-str (clojure.stacktrace/print-stack-trace ex)))
+    ;    (util/warn "exception: %s \n"
+    ;      (with-err-str (clojure.stacktrace/print-stack-trace ex)))))
+    ;(finally)))
+
+
+(s/def ::node (s/and inst?))
+(s/def ::rule-s (s/and inst? #(instance? java.util.List %)))
+(s/fdef node->string
+  :args (s/cat :node ::node :rule-s ::rule-s)
+  :ret string?)
+
+(defn tree->edn-tree
+  "A straight up reimplementation of ...
+  https://github.com/antlr/antlr4/blob/master/runtime/Java/src/org/antlr/v4/runtime/tree/Trees.java#L48
+  public static String toStringTree(final Tree t, final List<String> ruleNames) {}"
+  [node rule-list]
+  (let [s (node->string node rule-list)
+        count (.getChildCount node)]
     (if (> 1 count)
       s
       (let [sb (transient [(keyword s)])]
-        ;; (conj! sb count)
         (doseq [ix (range 0 count 1)]
-          (conj! sb (to-string-tree (.getChild tree ix) rules-list)))
+          (conj! sb (tree->edn-tree (.getChild node ix) rule-list)))
         (persistent! sb)))))
+
+(defn node->rdf-seq
+  "A naive export of the node to RDF triples."
+  [node rule-s]
+  (cond
+    (instance? org.antlr.v4.runtime.RuleContext node)
+    (let [rule-index (.. node (getRuleContext) (getRuleIndex))
+          rule-name (.get rule-s rule-index)
+          alt-number (.. node (getAltNumber))]
+      (if (= alt-number ATN/INVALID_ALT_NUMBER)
+        rule-name
+        (concat rule-name ':' alt-number)))
+
+    (instance? org.antlr.v4.runtime.tree.ErrorNode node)
+    (.. node (toString))
+
+    (instance? org.antlr.v4.runtime.tree.TerminalNode node)
+    (let [symbol (.. node (getSymbol))]
+      (if (nil? symbol)
+        (.. symbol (getText))
+        (let [payload (.. node (getPayload))]
+          (if (instance? org.antlr.v4.runtime.Token payload)
+            (.. payload (getText))
+            (.. payload (toString))))))
+
+    :else
+    (let [payload (.. node (getPayload))]
+      (if (instance? org.antlr.v4.runtime.Token payload)
+        (.. payload (getText))
+        (.. payload (toString))))))
+
+
+(defn tree->rdf-seq
+  "A naive export of the parse tree to RDF triples.
+  This needs to be lossless as we will want the process
+  to be easily reversable.
+  The idea here is that manipulating a parse tree in a
+  graph database makes a lot of sense."
+  [root rule-list]
+  (persistent!
+    (reduce
+      (fn [rdf-seq node]
+          (reduce #(conj! %1 %2)
+                   rdf-seq
+                   (node->rdf-seq node rule-list)))
+      (transient [])
+      (tree-seq
+        #(instance? org.antlr.v4.runtime.tree.TerminalNode %)
+        #(for [ix (range 0 (.getCount %) 1)]
+            (.getChild % ix))
+        root))))
 
 
 ;; https://github.com/antlr/antlr4/blob/master/tool/src/org/antlr/v4/Tool.java
@@ -294,7 +391,9 @@
    i input          OPT     [str]  "the file name of the input to parse"
    s show                   bool   "show the constructed properties"
    a tokens                 bool   "produce the annotated token stream"
-   t tree                   bool   "produce the annotated parse tree"
+   t tree                   bool   "produce the annotated parse tree in lisp form"
+   _ edn                    bool   "produce the annotated parse tree in edn form"
+   _ rdf                    bool   "produce the annotated parse tree in rdf form"
    z postscript             bool   "produce a postscript output of the parse tree"
    x trace                  bool   "show the progress that the parser makes"
    d diagnostics            bool   "show some diagnostics"
@@ -369,7 +468,7 @@
                    .getInterpreter
                    (.setPredictionMode PredictionMode/LL_EXACT_AMBIG_DETECTION)))
 
-             (when (or tree postscript)
+             (when (or tree postscript edn rdf)
                (util/info "enable parse tree \n")
                (.setBuildParseTree parser-inst true))
 
@@ -386,18 +485,42 @@
               ;; https://github.com/clojure/clojure/blob/master/src/jvm/clojure/lang/Reflector.java#L319
              (try
               (let [parse-tree (Reflector/invokeInstanceMember
-                                  parser-inst start-rule)]
+                                  parser-inst start-rule)
+                    rule-array (when parser-inst (.getRuleNames parser-inst))
+                    rule-list (when rule-array (java.util.Arrays/asList rule-array))]
                 (when tree
-                  (util/info "write parse tree as EDN\n")
-                  (let [out-path (io/file tgt-file-path "tree.edn")
+                  (util/info "write parse tree as lisp\n")
+                  (let [out-path (io/file tgt-file-path "tree.lisp")
                         has-dirs? (io/make-parents out-path)
-                        rules-list (get-rules-list parser-inst)
-                        edn-tree (to-string-tree parse-tree rules-list)]
+                        lisp-tree-str (.toStringTree parse-tree rule-list)]
                     (with-open [wtr (io/writer out-path
                                         :encoding "UTF-8"
                                         :append true)]
-                        ;; (pp/pprint rules-list wtr)
+                        ;; (pp/pprint rule-list wtr)
+                        (.write wtr lisp-tree-str))))
+
+                (when edn
+                  (util/info "write parse tree as EDN\n")
+                  (let [out-path (io/file tgt-file-path "tree.edn")
+                        has-dirs? (io/make-parents out-path)
+                        edn-tree (tree->edn-tree parse-tree rule-list)]
+                    (with-open [wtr (io/writer out-path
+                                        :encoding "UTF-8"
+                                        :append true)]
+                        ;; (pp/pprint rule-list wtr)
                         (pp/pprint edn-tree wtr))))
+
+
+                (when rdf
+                  (util/info "write parse tree as RDF\n")
+                  (let [out-path (io/file tgt-file-path "tree.ttl")
+                        has-dirs? (io/make-parents out-path)
+                        rdf-seq (tree->rdf-seq parse-tree rule-list)]
+                    (with-open [wtr (io/writer out-path
+                                        :encoding "UTF-8"
+                                        :append true)]
+                        ;; (pp/pprint rule-list wtr)
+                        (pp/pprint rdf-seq wtr))))
 
                 (when postscript
                   (util/info "write parse tree as postscript\n")
