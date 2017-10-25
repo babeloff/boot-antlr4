@@ -295,12 +295,13 @@
                   (util/info "write parse tree as RDF\n")
                   (let [out-path (io/file tgt-file-path "tree.ttl")
                         has-dirs? (io/make-parents out-path)
-                        rdf-seq (emit-rdf/tree->rdf-seq parse-tree rule-list)]
+                        rdf-graph (emit-rdf/tree->rdf-graph parse-tree rule-list)]
                     (with-open [wtr (io/writer out-path
                                         :encoding "UTF-8"
                                         :append true)]
-                        ;; (pp/pprint rule-list wtr)
-                        (pp/pprint rdf-seq wtr))))
+                      (doseq [triple (.iterate rdf-graph)]
+                        (.write wtr (.toString triple))
+                        (.write wtr "\n")))))
 
                 (when postscript
                   (util/info "write parse tree as postscript\n")
