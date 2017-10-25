@@ -9,6 +9,8 @@
                             [adzerk/boot-test "RELEASE" :scope "test"]
                             ;; https://mvnrepository.com/artifact/org.antlr/antlr4
                             [org.antlr/antlr4 "4.7"]
+                            [rdf-clj "0.1.0"]
+                            [org.apache.commons/commons-rdf-jena "0.3.0-incubating"]
                             [org.clojure/java.classpath "0.2.3"]
                             [adzerk/bootlaces "0.1.13" :scope "test"]])
 

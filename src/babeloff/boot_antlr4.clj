@@ -11,235 +11,30 @@
             (clojure.java [io :as io]
                           [classpath :as cp])
             (clojure.spec [alpha :as s])
-            (me.raynes [fs :as fs]))
-  (:import (clojure.lang DynamicClassLoader
-                         Reflector)
-           (clojure.asm ClassReader)
-           (org.antlr.v4 Tool)
-           (org.antlr.v4.tool LexerGrammar
-                              Grammar)
-           (org.antlr.v4.parse ANTLRParser)
+            (clojure.spec.test [alpha :as stest])
+            (me.raynes [fs :as fs])
+            [rdf :as rdf]
+            (babeloff [options :as opt]
+                      [dynamic-import :as importer])
+            (babeloff.antlr4 [emit-edn :as emit-edn]
+                             [emit-rdf :as emit-rdf]
+                             [util :as antlr]
+                             [interpret :as antlr-interpret]))
+  (:import (org.antlr.v4.tool Grammar)
            (org.antlr.v4.runtime RuleContext
                                  CharStream CharStreams
                                  CommonToken CommonTokenStream
-                                 DiagnosticErrorListener
                                  Lexer Parser
                                  Token TokenStream)
-           (org.antlr.v4.runtime.atn PredictionMode
-                                     ATN)
-           (org.antlr.v4.runtime.tree.Trees)
-           (org.antlr.v4.runtime.tree ParseTree)
+           (org.antlr.v4.runtime.atn ATN)
            (java.nio.file Paths)
            (java.nio.charset Charset)
-           (java.io IOException)
-           (org.antlr.v4.gui.Trees)
+           (org.antlr.v4.gui Trees)
            (java.lang.reflect Constructor
-                              InvocationTargetException
                               Method)
-           (java.util ArrayList
-                      List)))
+           (java.util List)))
 
 
-(defmacro with-err-str
-  "Evaluates exprs in a context in which *out* and *err*
-  are bound to a fresh StringWriter.
-  Returns the string created by any nested printing calls."
-  {:added "1.9"}
-  [& body]
-  `(let [s# (new java.io.StringWriter)]
-     (binding [*out* s#, *err* s#]
-       ~@body
-       (str s#))))
-
-
-(defn value-opt!
-  [args option object]
-  (if object
-    (do
-      ;(util/info "arg: %s %s\n" option object)
-      (-> args
-          (conj! option)
-          (conj! object)))
-    (do
-      ;(util/info "no-arg: %s %s\n" option object)
-      args)))
-
-
-(defn bool-opt!
-  [args option object]
-  (if (sequential? option)
-    (do
-      ;(util/info "arg: %s %s\n" option object)
-      (conj! args (if object (first option) (second option))))
-    (do
-      ;(util/info "arg: %s %s\n" option object)
-      (if object
-        (conj! args option)
-        args))))
-
-(defn override-opt!
-  [args overrides]
-  (if-not (empty? overrides)
-    (do)
-      ;(util/info "no-overrides\n"))
-    (loop [argset args,
-           items overrides]
-      (if (empty? items)
-        argset
-        (do
-          ;(util/info "arg: %s\n" (first items))
-          (recur (conj! argset (str "-D" (first items)))
-                 (rest items)))))))
-
-(defn source-opt!
-  [args source fileset]
-  (-> args
-    (conj! "-lib")
-    (conj! (or source
-             (.getCanonicalPath (first (boot/input-dirs fileset)))))))
-
-(defn show-array
-  [arry]
-  (loop [arr arry, builder (StringBuilder.)]
-    (if (empty? arr)
-      (do
-        (util/info " tool args: %s\n"
-                (.toString builder))
-        arry)
-      (recur (rest arr)
-             (-> builder
-                 (.append " ")
-                 (.append (first arr)))))))
-
-
-;;  Imitate the behavior of
-;;    https://github.com/antlr/antlr4/blob/master/runtime/Java/src/org/antlr/v4/runtime/RuleContext.java
-;;    https://github.com/antlr/antlr4/blob/master/runtime/Java/src/org/antlr/v4/runtime/tree/Trees.java
-;;
-;;   recursively build an array tree of nodes and their values.
-
-;; https://github.com/antlr/antlr4/blob/master/runtime/Java/src/org/antlr/v4/runtime/tree/Trees.java#L70
-(defn node->string
-  "A naive export of the node to RDF triples."
-  [node rule-list]
-  ;(try)
-  (cond
-    (instance? org.antlr.v4.runtime.RuleContext node)
-    (let [rule-index (.. node (getRuleContext) (getRuleIndex))
-          rule-name (.get rule-list rule-index)
-          alt-number (.. node (getAltNumber))]
-      (if (= alt-number ATN/INVALID_ALT_NUMBER)
-        rule-name
-        (concat rule-name ':' alt-number)))
-
-    (instance? org.antlr.v4.runtime.tree.ErrorNode node)
-    (.. node (toString))
-
-    (instance? org.antlr.v4.runtime.tree.TerminalNode node)
-    (let [symbol (.. node (getSymbol))]
-      (if (nil? symbol)
-        (.. symbol (getText))
-        (let [payload (.. node (getPayload))]
-          (if (instance? org.antlr.v4.runtime.Token payload)
-            (.. payload (getText))
-            (.. payload (toString))))))
-
-    :else
-    (let [payload (.. node (getPayload))]
-      (if (instance? org.antlr.v4.runtime.Token payload)
-        (.. payload (getText))
-        (.. payload (toString))))))
-
-    ;(catch java.lang.IllegalArgumentException ex
-    ;  (if  (and (s/valid? ::node node))
-    ;    (util/warn "exception: %s \n"
-    ;      (with-err-str (clojure.stacktrace/print-stack-trace ex)))
-    ;    (util/warn "exception: %s \n"
-    ;      (with-err-str (clojure.stacktrace/print-stack-trace ex)))))
-    ;(finally)))
-
-
-(s/def ::node (s/and inst?))
-(s/def ::rule-s (s/and inst? #(instance? java.util.List %)))
-(s/fdef node->string
-  :args (s/cat :node ::node :rule-s ::rule-s)
-  :ret string?)
-
-(defn tree->edn-tree
-  "A straight up reimplementation of ...
-  https://github.com/antlr/antlr4/blob/master/runtime/Java/src/org/antlr/v4/runtime/tree/Trees.java#L48
-  public static String toStringTree(final Tree t, final List<String> ruleNames) {}"
-  [node rule-list]
-  (let [s (node->string node rule-list)
-        count (.getChildCount node)]
-    (if (> 1 count)
-      s
-      (let [sb (transient [(keyword s)])]
-        (doseq [ix (range 0 count 1)]
-          (conj! sb (tree->edn-tree (.getChild node ix) rule-list)))
-        (persistent! sb)))))
-
-(defn node->rdf-seq
-  "A naive export of the node to RDF triples."
-  [node rule-s]
-  (cond
-    (instance? org.antlr.v4.runtime.RuleContext node)
-    (let [rule-index (.. node (getRuleContext) (getRuleIndex))
-          rule-name (.get rule-s rule-index)
-          alt-number (.. node (getAltNumber))]
-      (if (= alt-number ATN/INVALID_ALT_NUMBER)
-        rule-name
-        (concat rule-name ':' alt-number)))
-
-    (instance? org.antlr.v4.runtime.tree.ErrorNode node)
-    (.. node (toString))
-
-    (instance? org.antlr.v4.runtime.tree.TerminalNode node)
-    (let [symbol (.. node (getSymbol))]
-      (if (nil? symbol)
-        (.. symbol (getText))
-        (let [payload (.. node (getPayload))]
-          (if (instance? org.antlr.v4.runtime.Token payload)
-            (.. payload (getText))
-            (.. payload (toString))))))
-
-    :else
-    (let [payload (.. node (getPayload))]
-      (if (instance? org.antlr.v4.runtime.Token payload)
-        (.. payload (getText))
-        (.. payload (toString))))))
-
-
-(defn tree->rdf-seq
-  "A naive export of the parse tree to RDF triples.
-  This needs to be lossless as we will want the process
-  to be easily reversable.
-  The idea here is that manipulating a parse tree in a
-  graph database makes a lot of sense."
-  [root rule-list]
-  (persistent!
-    (reduce
-      (fn [rdf-seq node]
-          (reduce #(conj! %1 %2)
-                   rdf-seq
-                   (node->rdf-seq node rule-list)))
-      (transient [])
-      (tree-seq
-        #(instance? org.antlr.v4.runtime.tree.TerminalNode %)
-        #(for [ix (range 0 (.getCount %) 1)]
-            (.getChild % ix))
-        root))))
-
-
-;; https://github.com/antlr/antlr4/blob/master/tool/src/org/antlr/v4/Tool.java
-(defn run-antlr4!
-  ""
-  [args show]
-  (when show (show-array args))
-  (util/info "running antlr4: %s\n"
-    (with-err-str
-        (let [antlr (Tool. (into-array args))]
-          (.processGrammarsOnCommandLine antlr)))))
 
 ;; https://github.com/antlr/antlr4/blob/master/doc/tool-options.md
 ;; https://github.com/antlr/antlr4/blob/master/tool/src/org/antlr/v4/Tool.java
@@ -297,30 +92,32 @@
           ;(util/info "target: %s\n" target)
           (util/info "compiling grammar: %s\n" grammar)
 
-          (-> (transient ["-o" target-dir-str])
-              (source-opt! source fileset)
+          (let [args (-> (transient ["-o" target-dir-str])
+                         (opt/source! source fileset)
 
-              (value-opt! "-encoding" encoding)
-              (value-opt! "-message-format" message-format)
-              (value-opt! "-package" package)
+                         (opt/value! "-encoding" encoding)
+                         (opt/value! "-message-format" message-format)
+                         (opt/value! "-package" package)
 
-              (override-opt! override)
+                         (opt/override! override)
 
-              (bool-opt! "-atn" atn)
-              (bool-opt! "-long-messages" long-messages)
-              (bool-opt! ["-listener" "-no-listener"] listener)
-              (bool-opt! ["-visitor" "-no-visitor"] visitor)
-              (bool-opt! "-depend" depend)
+                         (opt/bool! "-atn" atn)
+                         (opt/bool! "-long-messages" long-messages)
+                         (opt/bool! ["-listener" "-no-listener"] listener)
+                         (opt/bool! ["-visitor" "-no-visitor"] visitor)
+                         (opt/bool! "-depend" depend)
 
-              (bool-opt! "-Werror" warn-error)
-              (bool-opt! "-XdbgST" debug-st)
-              (bool-opt! "-Xsave-lexer" save-lexer)
-              (bool-opt! "-XdbgSTWait" debug-st-wait)
-              (bool-opt! "-Xforce-atn" force-atn)
-              (bool-opt! "-Xlog" log)
-              (conj! grammar-file-str)
-              persistent!
-              (run-antlr4! show))
+                         (opt/bool! "-Werror" warn-error)
+                         (opt/bool! "-XdbgST" debug-st)
+                         (opt/bool! "-Xsave-lexer" save-lexer)
+                         (opt/bool! "-XdbgSTWait" debug-st-wait)
+                         (opt/bool! "-Xforce-atn" force-atn)
+                         (opt/bool! "-Xlog" log)
+                         (conj! grammar-file-str)
+                         persistent!)]
+            (util/info "running antlr4: %s\n" args)
+            ;(if show (show-array args))
+            (opt/with-err-str (antlr/run-tool! args)))
 
           ;; prepare fileset and call next-handler
           (let [fileset' (-> fileset
@@ -334,23 +131,6 @@
 ;;(deftesttask antlr4-tests []
 ;;  (comp (antlr4 :grammar "AqlCommentTest.g4" :show 5)
 ;;        (to-asset-invert-tests))))
-(defn file->bytes [file]
-  (with-open [xin (io/input-stream file)
-              xout (java.io.ByteArrayOutputStream.)]
-    (when xin
-      (io/copy xin xout)
-      (.toByteArray xout))))
-
-(defn define-class
- [class-loader class-name class-path]
- ;; (if (.findInMemoryClass class-loader class-name)
- (try
-    (let [class-bytes (file->bytes class-path)]
-     (when class-bytes
-       (.defineClass class-loader class-name class-bytes "")))
-    (catch java.lang.LinkageError ex
-      (util/info "already loaded: %s \n" class-name)
-      "")))
 
 (defn class-path->name
   [path]
@@ -371,7 +151,12 @@
             class-path (boot/tmp-path in)
             class-name (class-path->name class-path)]
         ; (util/info "load class: %s & %s\n" class-name class-path)
-        (define-class class-loader class-name class-file)))))
+        (try
+          (importer/define-class class-loader class-name class-file)
+          (catch java.lang.LinkageError ex
+            (util/info "already loaded: %s \n" class-name)
+            ""))))))
+
 
 (defn get-target-path
   [file-path]
@@ -422,18 +207,18 @@
        (when show
          (util/info "parse options: %s\n" *opts*))
 
-       (let [class-loader (DynamicClassLoader.)
+       (let [class-loader (importer/make-loader)
              _ (define-class-family fileset class-loader parser)
 
-             lexer-class ^Lexer (.loadClass class-loader lexer)
-             lexer-inst (Reflector/invokeConstructor lexer-class
+             lexer-class ^Lexer (importer/load-class class-loader lexer)
+             lexer-inst (importer/invoke-constructor lexer-class
                                  (into-array CharStream [nil]))
 
-             parser-class ^Parser (.loadClass class-loader parser)
-             parser-inst (Reflector/invokeConstructor parser-class
+             parser-class ^Parser (importer/load-class class-loader parser)
+             parser-inst (importer/invoke-constructor parser-class
                            (into-array  TokenStream [nil]))
 
-             char-set (Charset/defaultCharset)]
+             char-set importer/default-charset]
 
          (doseq [file-path input]
            (util/info "input: %s\n" file-path)
@@ -463,10 +248,7 @@
 
              (when diagnostics
                (util/info "enable diagnostics \n")
-               (.addErrorListener parser-inst (DiagnosticErrorListener.))
-               (-> parser-inst
-                   .getInterpreter
-                   (.setPredictionMode PredictionMode/LL_EXACT_AMBIG_DETECTION)))
+               (antlr-interpret/dianostics parser-inst))
 
              (when (or tree postscript edn rdf)
                (util/info "enable parse tree \n")
@@ -474,9 +256,7 @@
 
              (when sll
                (util/info "use SLL \n")
-              (-> parser-inst
-                   .getInterpreter
-                   (.setPredictionMode PredictionMode/SLL)))
+               (antlr-interpret/sll parser-inst))
 
              (doto parser-inst
                (.setTokenStream token-stream))
@@ -484,7 +264,7 @@
 
               ;; https://github.com/clojure/clojure/blob/master/src/jvm/clojure/lang/Reflector.java#L319
              (try
-              (let [parse-tree (Reflector/invokeInstanceMember
+              (let [parse-tree (importer/invoke-inst-member
                                   parser-inst start-rule)
                     rule-array (when parser-inst (.getRuleNames parser-inst))
                     rule-list (when rule-array (java.util.Arrays/asList rule-array))]
@@ -503,7 +283,7 @@
                   (util/info "write parse tree as EDN\n")
                   (let [out-path (io/file tgt-file-path "tree.edn")
                         has-dirs? (io/make-parents out-path)
-                        edn-tree (tree->edn-tree parse-tree rule-list)]
+                        edn-tree (emit-edn/tree->edn-tree parse-tree rule-list)]
                     (with-open [wtr (io/writer out-path
                                         :encoding "UTF-8"
                                         :append true)]
@@ -515,7 +295,7 @@
                   (util/info "write parse tree as RDF\n")
                   (let [out-path (io/file tgt-file-path "tree.ttl")
                         has-dirs? (io/make-parents out-path)
-                        rdf-seq (tree->rdf-seq parse-tree rule-list)]
+                        rdf-seq (emit-rdf/tree->rdf-seq parse-tree rule-list)]
                     (with-open [wtr (io/writer out-path
                                         :encoding "UTF-8"
                                         :append true)]
@@ -526,7 +306,7 @@
                   (util/info "write parse tree as postscript\n")
                   (let [out-path (io/file tgt-file-path "tree.ps")
                         has-dirs? (io/make-parents out-path)]
-                    (org.antlr.v4.gui.Trees/save
+                    (Trees/save
                           parse-tree parser-inst (.getAbsolutePath out-path)))))
 
               (catch NoSuchMethodException ex

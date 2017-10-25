@@ -31,19 +31,30 @@
                                 Method)
              (java.util ArrayList
                         List)))
-  
+
 ;; https://github.com/antlr/antlr4/blob/master/doc/interpreters.md
+
+(defn dianostics [parser-inst]
+  (.addErrorListener parser-inst (DiagnosticErrorListener.))
+  (-> parser-inst
+      .getInterpreter
+      (.setPredictionMode PredictionMode/LL_EXACT_AMBIG_DETECTION)))
+
+(defn sll [parser-inst]
+  (-> parser-inst
+      .getInterpreter
+      (.setPredictionMode PredictionMode/SLL)))
 
 (defn load-lexer-grammar
     [^String lexerGrammarFileName]
     ^LexerGrammar (Grammar/load lexerGrammarFileName))
-  
+
 (defn load-parser-grammar
   [^LexerGrammar lexer-grammar
    ^String parserGrammarFileName]
   ^ParserGrammar (Grammar/load parserGrammarFileName))
-  
-  
+
+
 (defn interpret-combined
   [^String fileName
    ^String combinedGrammarFileName
@@ -51,12 +62,12 @@
   (let [grammar (Grammar/load combinedGrammarFileName)
         char-stream (CharStreams/fromPath (Paths/get fileName))
         lexer (.createLexerInterpreter grammar char-stream)
-  
+
         token-stream (CommonTokenStream. lexer)
         parser (.createParserInterpreter grammar token-stream)]
-  
+
     (.parse parser (.index (.getRule grammar startRule)))))
-  
+
 (defn interpret-separate
   [^String fileNameToParse
    ^String lexerGrammarFileName
@@ -65,20 +76,19 @@
   (let [^LexerGrammar lexer-grammar (Grammar/load lexerGrammarFileName)
         char-stream (CharStreams/fromPath (Paths/get fileNameToParse))
         lexer (.createLexerInterpreter lexer-grammar char-stream)
-  
+
         parser-grammar (Grammar/load parserGrammarFileName)
         token-stream  (CommonTokenStream. lexer)
         parser (.createParserInterpreter parser-grammar token-stream)]
-  
+
     (.parse parser (.index (.getRule parser-grammar startRule)))))
-  
+
 (defn print-tree [tree parser]
     (pp/pprint (.toStringTree tree parser)))
-  
+
 (deftask antlr4-interpreter
   "A task that returns a parser for a grammar.
      typically this parser would be returned to a REPL."
   [g grammar FILE str "grammar file"
    l lexer bool "enable lexer for grammar"
    p parser bool "enable parser for grammar"])
-  
