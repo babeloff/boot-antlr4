@@ -178,7 +178,7 @@
    a tokens                 bool   "produce the annotated token stream"
    t tree                   bool   "produce the annotated parse tree in lisp form"
    _ edn                    bool   "produce the annotated parse tree in edn form"
-   _ rdf                    bool   "produce the annotated parse tree in rdf form"
+   _ rdf            ENGINE  kw     "produce the annotated parse tree in rdf form using the specified ENGINE :simple, :clojure, :jena"
    z postscript             bool   "produce a postscript output of the parse tree"
    x trace                  bool   "show the progress that the parser makes"
    d diagnostics            bool   "show some diagnostics"
@@ -295,13 +295,17 @@
                   (util/info "write parse tree as RDF\n")
                   (let [out-path (io/file tgt-file-path "tree.ttl")
                         has-dirs? (io/make-parents out-path)
-                        rdf-graph (emit-rdf/tree->rdf-graph parse-tree rule-list)]
+                        rdf-graph (emit-rdf/tree->rdf-graph parse-tree rdf rule-list)]
                     (with-open [wtr (io/writer out-path
                                         :encoding "UTF-8"
                                         :append true)]
-                      (doseq [triple (.iterate rdf-graph)]
-                        (.write wtr (.toString triple))
-                        (.write wtr "\n")))))
+                      (case rdf
+                        :clojure
+                        (pp/pprint rdf-graph wtr)
+
+                        (doseq [triple (.iterate rdf-graph)]
+                          (.write wtr (.toString triple))
+                          (.write wtr "\n"))))))
 
                 (when postscript
                   (util/info "write parse tree as postscript\n")
