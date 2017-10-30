@@ -155,7 +155,7 @@
 
 
 (defn get-target-path
-  [file-path]
+  [target-dir file-path]
   (->> (fs/split file-path)
        (map #(case % ".." "dots" "." "dot" %))))
 
@@ -201,8 +201,8 @@
 (defn handle-parse-tree
   "https://github.com/clojure/clojure/blob/master/src/jvm/clojure/lang/Reflector.java#L319
   "
-  [parse-tree 
-   tgt-file-path parser-inst 
+  [parse-tree
+   tgt-file-path parser-inst
    opt-tree opt-edn opt-rdf opt-postscript]
   (let [rule-array (when parser-inst (.getRuleNames parser-inst))
         rule-list (when rule-array (java.util.Arrays/asList rule-array))]
@@ -251,6 +251,41 @@
         (Trees/save
               parse-tree parser-inst (.getAbsolutePath out-path))))))
 
+(defn parse-file
+  "This function is intended to be called by a boot task."
+  [lexer-inst parser-inst char-set
+   start-rule input target-dir-fn
+     {:keys [encoding show tokens
+             lisp edn rdf postscript
+             trace diagnostics sll]}]
+
+  (doseq [file-path input]
+    (util/info "input: %s\n" file-path)
+
+    (let [tgt-file-path (target-dir-fn file-path)
+          src-file (Paths/get file-path (make-array String 0))
+          char-stream (CharStreams/fromPath src-file char-set)
+          _ (.setInputStream lexer-inst char-stream)
+          token-stream (CommonTokenStream. lexer-inst)]
+
+       (initialize-parser
+         file-path token-stream tokens tgt-file-path
+         lexer-inst parser-inst
+         diagnostics sll
+         lisp edn rdf postscript)
+      (try
+       (handle-parse-tree
+         (importer/invoke-inst-member parser-inst start-rule)
+         tgt-file-path parser-inst
+         lisp edn rdf postscript)
+
+       (catch NoSuchMethodException ex
+             (util/info "no method for rule %s or it has arguements \n"
+                         start-rule))
+       (finally
+               (util/info "releasing %s\n" file-path))))))
+
+
 ;; https://github.com/antlr/antlr4/blob/master/tool/src/org/antlr/v4/gui/TestRig.java
 ;; this does some fancy stuff ...
 ;; dyanmically import classes and runs their constructors.
@@ -271,73 +306,62 @@
    x trace                  bool   "show the progress that the parser makes"
    d diagnostics            bool   "show some diagnostics"
    f sll                    bool   "use the fast SLL prediction mode"]
-  (if-not parser
+  (cond
+    (not parser)
     (do
       (boot.util/fail "The --parser argument is required")
-      (*usage*)))
-  (if-not start-rule
+      (*usage*))
+
+    (not start-rule)
     (do
       (boot.util/fail "The --start-rule argument is required")
-      (*usage*)))
+      (*usage*))
 
-  (let [target-dir (boot/tmp-dir!)
-        target-dir-str (.getCanonicalPath target-dir)]
-    (fn middleware [next-handler]
-      (fn handler [fileset]
-        (boot/empty-dir! target-dir)
-        (util/info "target: %s\n" target-dir-str)
-        (util/info "parser: %s\n" parser)
-        (util/info "lexer: %s\n" lexer)
-        (util/info "working directory: %s\n"
-          (-> (Paths/get "." (make-array String 0))
-             .toAbsolutePath .normalize .toString))
+    :else
+    (let [target-dir (boot/tmp-dir!)
+          target-dir-str (.getCanonicalPath target-dir)]
+      (fn middleware [next-handler]
+        (fn handler [fileset]
 
-       (when show
-         (util/info "parse options: %s\n" *opts*))
+          ;; pre-processing
+          (boot/empty-dir! target-dir)
+          (util/info "target: %s\n" target-dir-str)
+          (util/info "parser: %s\n" parser)
+          (util/info "lexer: %s\n" lexer)
+          (util/info "working directory: %s\n"
+            (-> (Paths/get "." (make-array String 0))
+               .toAbsolutePath .normalize .toString))
 
-       (let [class-loader (importer/make-loader)
-             _ (define-class-family fileset class-loader parser)
+         (when show
+           (util/info "parse options: %s\n" *opts*))
+         (let [class-loader (importer/make-loader)
+               _ (define-class-family fileset class-loader parser)
 
-             lexer-class ^Lexer (importer/load-class class-loader lexer)
-             lexer-inst (importer/invoke-constructor lexer-class
-                                 (into-array CharStream [nil]))
+               lexer-class ^Lexer (importer/load-class class-loader lexer)
+               lexer-inst (importer/invoke-constructor lexer-class
+                                   (into-array CharStream [nil]))
 
-             parser-class ^Parser (importer/load-class class-loader parser)
-             parser-inst (importer/invoke-constructor parser-class
-                           (into-array  TokenStream [nil]))
+               parser-class ^Parser (importer/load-class class-loader parser)
+               parser-inst (importer/invoke-constructor parser-class
+                             (into-array  TokenStream [nil]))
 
-             char-set importer/default-charset]
-         (doseq [file-path input]
-           (util/info "input: %s\n" file-path)
+               char-set importer/default-charset
+               ;; The target-file-fn
+               ;; creates the target file path
+               ;; given the source file path.
+               target-file-fn #(apply io/file target-dir (get-target-path %))]
 
-           (let [tgt-file-path (apply io/file target-dir (get-target-path file-path))
-                 src-file (Paths/get file-path (make-array String 0))
-                 char-stream (CharStreams/fromPath src-file char-set)
-                 _ (.setInputStream lexer-inst char-stream)
-                 token-stream (CommonTokenStream. lexer-inst)]
+           (parse-file lexer-inst parser-inst char-set
+              start-rule input target-file-fn
+              {:encoding encoding :show show :tokens tokens
+                :lisp tree :edn edn :rdf rdf :postscript postscript
+                :trace trace :diagnostics diagnostics :sll sll}))
 
-              (initialize-parser
-                file-path token-stream tokens tgt-file-path
-                lexer-inst parser-inst
-                diagnostics sll 
-                tree edn rdf postscript)
-             (try
-              (handle-parse-tree
-                (importer/invoke-inst-member parser-inst start-rule)
-                tgt-file-path parser-inst 
-                tree edn rdf postscript)
-
-              (catch NoSuchMethodException ex
-                    (util/info "no method for rule %s or it has arguements \n"
-                                start-rule))
-              (finally
-                      (util/info "releasing %s\n" file-path))))))
-
-          ;; prepare fileset and call next-handler
-       (let [fileset' (-> fileset
-                           (boot/add-asset target-dir)
-                           boot/commit!)
-             result (next-handler fileset')]
-         ;; post processing
-         ;; the goal here is to perform any side effects
-         result)))))
+         ;; prepare fileset and call next-handler
+         (let [fileset' (-> fileset
+                             (boot/add-asset target-dir)
+                             boot/commit!)
+               result (next-handler fileset')]
+           ;; post-processing
+           ;; the goal here is to perform any side effects
+           result))))))
