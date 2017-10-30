@@ -41,4 +41,4 @@
  ;; (if (.findInMemoryClass class-loader class-name)
  (let [class-bytes (file->bytes class-path)]
   (when class-bytes
-    (.defineClass class-loader class-name class-bytes "") )))
+    (.defineClass class-loader class-name class-bytes ""))))

@@ -13,6 +13,14 @@
                             [org.clojure/java.classpath "0.2.3"]
                             [adzerk/bootlaces "0.1.13" :scope "test"]])
 
+(require '[adzerk.boot-test :refer [test]]
+  '[adzerk.bootlaces :refer [bootlaces!
+                              build-jar
+                              push-snapshot
+                              push-release]])
+(require '[rdf :as rdf])
+(bootlaces! version)
+                     
 (task-options!
  pom {:project     project
       :version     version
@@ -22,20 +30,10 @@
       :license     {"Eclipse Public License"
                     "http://www.eclipse.org/legal/epl-v10.html"}})
 
-
-(require '[adzerk.boot-test :refer [test]]
-         '[adzerk.bootlaces :refer [bootlaces!
-                                    build-jar
-                                    push-snapshot
-                                    push-release]])
-(require '[rdf :as rdf])
-(bootlaces! version)
-
-
 (deftask build
   "Build and install the project locally."
   []
-  (comp (pom) (jar) (install)))
+  (comp (pom) (build-jar) (install)))
 
 (deftask release
   "release to clojars

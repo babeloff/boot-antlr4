@@ -30,11 +30,7 @@
            (java.nio.file Paths)
            (java.nio.charset Charset)
            (org.antlr.v4.gui Trees)
-           (java.lang.reflect Constructor
-                              Method)
            (java.util List)))
-
-
 
 ;; https://github.com/antlr/antlr4/blob/master/doc/tool-options.md
 ;; https://github.com/antlr/antlr4/blob/master/tool/src/org/antlr/v4/Tool.java
@@ -163,6 +159,98 @@
   (->> (fs/split file-path)
        (map #(case % ".." "dots" "." "dot" %))))
 
+
+(defn initialize-parser
+  [file-path token-stream opt-tokens tgt-file-path
+   lexer-inst parser-inst
+   opt-diagnostics opt-sll opt-tree opt-edn opt-rdf opt-postscript]
+
+  (util/info "preparing token stream\n" file-path)
+  (.fill token-stream)
+
+  (util/info "token stream filled\n" file-path)
+  (when opt-tokens
+    (util/info "tokens enabled \n")
+    (let [out-path (io/file tgt-file-path "token.txt")
+          has-dirs? (io/make-parents out-path)]
+      (with-open [wtr (io/writer out-path
+                          :encoding "UTF-8"
+                          :append true)]
+        (doseq [tok (.getTokens token-stream)]
+          (.write wtr (str (if (instance? CommonToken tok)
+                            (.toString tok lexer-inst)
+                            (.toString tok))
+                          "\n"))))))
+
+  (when opt-diagnostics
+    (util/info "enable diagnostics \n")
+    (antlr-interpret/dianostics parser-inst))
+
+  (when (or opt-tree opt-postscript opt-edn opt-rdf)
+    (util/info "enable parse tree \n")
+    (.setBuildParseTree parser-inst true))
+
+  (when opt-sll
+    (util/info "use SLL \n")
+    (antlr-interpret/sll parser-inst))
+
+  (doto parser-inst
+    (.setTokenStream token-stream)))
+     ;;(.setTrace trace))
+
+(defn handle-parse-tree
+  "https://github.com/clojure/clojure/blob/master/src/jvm/clojure/lang/Reflector.java#L319
+  "
+  [parse-tree 
+   tgt-file-path parser-inst 
+   opt-tree opt-edn opt-rdf opt-postscript]
+  (let [rule-array (when parser-inst (.getRuleNames parser-inst))
+        rule-list (when rule-array (java.util.Arrays/asList rule-array))]
+    (when opt-tree
+      (util/info "write parse tree as lisp\n")
+      (let [out-path (io/file tgt-file-path "tree.lisp")
+            has-dirs? (io/make-parents out-path)
+            lisp-tree-str (.toStringTree parse-tree rule-list)]
+        (with-open [wtr (io/writer out-path
+                            :encoding "UTF-8"
+                            :append true)]
+            ;; (pp/pprint rule-list wtr)
+            (.write wtr lisp-tree-str))))
+
+    (when opt-edn
+      (util/info "write parse tree as EDN\n")
+      (let [out-path (io/file tgt-file-path "tree.edn")
+            has-dirs? (io/make-parents out-path)
+            edn-tree (emit-edn/tree->edn-tree parse-tree rule-list)]
+        (with-open [wtr (io/writer out-path
+                            :encoding "UTF-8"
+                            :append true)]
+            ;; (pp/pprint rule-list wtr)
+            (pp/pprint edn-tree wtr))))
+
+    (when opt-rdf
+      (util/info "write parse tree as RDF\n")
+      (let [out-path (io/file tgt-file-path "tree.ttl")
+            has-dirs? (io/make-parents out-path)
+            rdf-graph (emit-rdf/tree->rdf-graph parse-tree opt-rdf rule-list)]
+        (with-open [wtr (io/writer out-path
+                            :encoding "UTF-8"
+                            :append true)]
+          (case opt-rdf
+            :clojure
+            (pp/pprint rdf-graph wtr)
+
+            (doseq [triple (.iterate rdf-graph)]
+              (.write wtr (.toString triple))
+              (.write wtr "\n"))))))
+
+    (when opt-postscript
+      (util/info "write parse tree as postscript\n")
+      (let [out-path (io/file tgt-file-path "tree.ps")
+            has-dirs? (io/make-parents out-path)]
+        (Trees/save
+              parse-tree parser-inst (.getAbsolutePath out-path))))))
+
 ;; https://github.com/antlr/antlr4/blob/master/tool/src/org/antlr/v4/gui/TestRig.java
 ;; this does some fancy stuff ...
 ;; dyanmically import classes and runs their constructors.
@@ -219,7 +307,6 @@
                            (into-array  TokenStream [nil]))
 
              char-set importer/default-charset]
-
          (doseq [file-path input]
            (util/info "input: %s\n" file-path)
 
@@ -229,90 +316,16 @@
                  _ (.setInputStream lexer-inst char-stream)
                  token-stream (CommonTokenStream. lexer-inst)]
 
-             (util/info "preparing token stream\n" file-path)
-             (.fill token-stream)
-
-             (util/info "token stream filled\n" file-path)
-             (when tokens
-               (util/info "tokens enabled \n")
-               (let [out-path (io/file tgt-file-path "token.txt")
-                     has-dirs? (io/make-parents out-path)]
-                 (with-open [wtr (io/writer out-path
-                                     :encoding "UTF-8"
-                                     :append true)]
-                   (doseq [tok (.getTokens token-stream)]
-                     (.write wtr (str (if (instance? CommonToken tok)
-                                       (.toString tok lexer-inst)
-                                       (.toString tok))
-                                     "\n"))))))
-
-             (when diagnostics
-               (util/info "enable diagnostics \n")
-               (antlr-interpret/dianostics parser-inst))
-
-             (when (or tree postscript edn rdf)
-               (util/info "enable parse tree \n")
-               (.setBuildParseTree parser-inst true))
-
-             (when sll
-               (util/info "use SLL \n")
-               (antlr-interpret/sll parser-inst))
-
-             (doto parser-inst
-               (.setTokenStream token-stream))
-                ;;(.setTrace trace))
-
-              ;; https://github.com/clojure/clojure/blob/master/src/jvm/clojure/lang/Reflector.java#L319
+              (initialize-parser
+                file-path token-stream tokens tgt-file-path
+                lexer-inst parser-inst
+                diagnostics sll 
+                tree edn rdf postscript)
              (try
-              (let [parse-tree (importer/invoke-inst-member
-                                  parser-inst start-rule)
-                    rule-array (when parser-inst (.getRuleNames parser-inst))
-                    rule-list (when rule-array (java.util.Arrays/asList rule-array))]
-                (when tree
-                  (util/info "write parse tree as lisp\n")
-                  (let [out-path (io/file tgt-file-path "tree.lisp")
-                        has-dirs? (io/make-parents out-path)
-                        lisp-tree-str (.toStringTree parse-tree rule-list)]
-                    (with-open [wtr (io/writer out-path
-                                        :encoding "UTF-8"
-                                        :append true)]
-                        ;; (pp/pprint rule-list wtr)
-                        (.write wtr lisp-tree-str))))
-
-                (when edn
-                  (util/info "write parse tree as EDN\n")
-                  (let [out-path (io/file tgt-file-path "tree.edn")
-                        has-dirs? (io/make-parents out-path)
-                        edn-tree (emit-edn/tree->edn-tree parse-tree rule-list)]
-                    (with-open [wtr (io/writer out-path
-                                        :encoding "UTF-8"
-                                        :append true)]
-                        ;; (pp/pprint rule-list wtr)
-                        (pp/pprint edn-tree wtr))))
-
-
-                (when rdf
-                  (util/info "write parse tree as RDF\n")
-                  (let [out-path (io/file tgt-file-path "tree.ttl")
-                        has-dirs? (io/make-parents out-path)
-                        rdf-graph (emit-rdf/tree->rdf-graph parse-tree rdf rule-list)]
-                    (with-open [wtr (io/writer out-path
-                                        :encoding "UTF-8"
-                                        :append true)]
-                      (case rdf
-                        :clojure
-                        (pp/pprint rdf-graph wtr)
-
-                        (doseq [triple (.iterate rdf-graph)]
-                          (.write wtr (.toString triple))
-                          (.write wtr "\n"))))))
-
-                (when postscript
-                  (util/info "write parse tree as postscript\n")
-                  (let [out-path (io/file tgt-file-path "tree.ps")
-                        has-dirs? (io/make-parents out-path)]
-                    (Trees/save
-                          parse-tree parser-inst (.getAbsolutePath out-path)))))
+              (handle-parse-tree
+                (importer/invoke-inst-member parser-inst start-rule)
+                tgt-file-path parser-inst 
+                tree edn rdf postscript)
 
               (catch NoSuchMethodException ex
                     (util/info "no method for rule %s or it has arguements \n"
