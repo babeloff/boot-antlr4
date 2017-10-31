@@ -4,7 +4,7 @@
 (set-env! :resource-paths #{"resources" "src"}
           :source-paths   #{"test"}
           :dependencies   '[[org.clojure/clojure "RELEASE"]
-                            [org.clojure/spec.alpha "0.1.134"]
+                            [org.clojure/spec.alpha "0.1.143"]
                             [boot/core "RELEASE" :scope "test"]
                             [adzerk/boot-test "RELEASE" :scope "test"]
                             ;; https://mvnrepository.com/artifact/org.antlr/antlr4
