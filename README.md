@@ -3,11 +3,9 @@
 [![Build Status](https://travis-ci.org/babeloff/rdf-clj.svg?branch=master)](https://travis-ci.org/babeloff/boot-antlr4)
 [![Clojars Project](https://img.shields.io/clojars/v/babeloff/boot-antlr4.svg)](https://clojars.org/babeloff/boot-antlr4)
 
-Boot tasks to work with antlr4.
+Boot tasks for working with antlr4.
 This is alpha software; it is under ongoing development.
 Backward compatibility is **not** guaranteed.
-
-See https://clojars.org/babeloff/boot-antlr4
 
 ## Usage
 
@@ -24,7 +22,7 @@ Then require the task:
 The `generate` task generates java classes from the antlr4 grammar files.
 The `exercise` task provides some basic manipulations using the antlr4 TestRig.
 For usage please study the
-[parser project](https://github.com/babeloff/boot-antlr4-parser/README.md)
+[parser project](https://github.com/babeloff/boot-antlr4-parser)
 which demonstrates how to extend the Antlr4 grammar itself
 to allow a literate programming style.
 
