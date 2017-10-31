@@ -11,15 +11,14 @@
                             [org.antlr/antlr4 "4.7"]
                             [rdf-clj "0.2.0-SNAPSHOT"]
                             [org.clojure/java.classpath "0.2.3"]
-                            [adzerk/bootlaces "0.1.13" :scope "test"]])
+                            [radicalzephyr/bootlaces "0.1.14" :scope "test"]])
 
-(require '[adzerk.boot-test :refer [test]]
-  '[adzerk.bootlaces :refer [bootlaces!
-                              build-jar
-                              push-snapshot
-                              push-release]])
+(require
+  '[adzerk.boot-test :refer [test]]
+  '[radicalzephyr.bootlaces :as bl])
+
 (require '[rdf :as rdf])
-(bootlaces! version)
+(bl/bootlaces! version)
 
 (task-options!
  pom {:project     project
@@ -33,7 +32,7 @@
 (deftask build
   "Build and install the project locally."
   []
-  (comp (pom) (build-jar) (install)))
+  (comp (pom) (bl/build-jar) (install)))
 
 (deftask release
   "release to clojars
@@ -41,5 +40,5 @@
   your clojars user and password."
   []
   (comp
-    (build-jar)
-    (push-release)))
+    (bl/build-jar)
+    (bl/push-release)))

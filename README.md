@@ -1,6 +1,6 @@
 # boot-antlr4
 
-[![Build Status](https://travis-ci.org/babeloff/rdf-clj.svg?branch=master)](https://travis-ci.org/babeloff/boot-antlr4)
+[![Build Status](https://travis-ci.org/babeloff/boot-antlr4.svg?branch=master)](https://travis-ci.org/babeloff/boot-antlr4)
 [![Clojars Project](https://img.shields.io/clojars/v/babeloff/boot-antlr4.svg)](https://clojars.org/babeloff/boot-antlr4)
 
 Boot tasks for working with antlr4.
