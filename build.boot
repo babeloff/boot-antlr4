@@ -1,5 +1,5 @@
 (def project 'babeloff/boot-antlr4)
-(def version "2017.10.20-SNAPSHOT")
+(def version "2017.10.31")
 
 (set-env! :resource-paths #{"resources" "src"}
           :source-paths   #{"test"}
@@ -20,7 +20,7 @@
                               push-release]])
 (require '[rdf :as rdf])
 (bootlaces! version)
-                     
+
 (task-options!
  pom {:project     project
       :version     version

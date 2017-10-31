@@ -1,3 +1,5 @@
+
+
 (ns babeloff.boot-antlr4
   "an antlr task that builds lexers and parsers."
   {:boot/export-tasks true}
@@ -34,7 +36,7 @@
 
 ;; https://github.com/antlr/antlr4/blob/master/doc/tool-options.md
 ;; https://github.com/antlr/antlr4/blob/master/tool/src/org/antlr/v4/Tool.java
-(deftask antlr4
+(deftask generate
   "A task that generates parsers and lexers from antlr grammars."
   [g grammar        FILE    str    "grammar file"
    l source         LIB_DIR str    "specify location of grammars, tokens files"
@@ -124,10 +126,6 @@
             ;; the goal here is to perform any side effects
             result))))))
 
-;;(deftesttask antlr4-tests []
-;;  (comp (antlr4 :grammar "AqlCommentTest.g4" :show 5)
-;;        (to-asset-invert-tests))))
-
 (defn class-path->name
   [path]
   (let [package (drop-last (fs/split path))
@@ -152,12 +150,6 @@
           (catch java.lang.LinkageError ex
             (util/info "already loaded: %s \n" class-name)
             ""))))))
-
-
-(defn get-target-path
-  [target-dir file-path]
-  (->> (fs/split file-path)
-       (map #(case % ".." "dots" "." "dot" %))))
 
 
 (defn initialize-parser
@@ -290,7 +282,7 @@
 ;; this does some fancy stuff ...
 ;; dyanmically import classes and runs their constructors.
 ;; the gui option from TestRig is not supported.
-(deftask test-rig
+(deftask exercise
   "A task that runs parsers and lexers against samples."
   [p parser         CLASS   str    "parser name"
    l lexer          CLASS   str    "lexer name"
@@ -349,7 +341,11 @@
                ;; The target-file-fn
                ;; creates the target file path
                ;; given the source file path.
-               target-file-fn #(apply io/file target-dir (get-target-path %))]
+               target-file-fn
+               (fn [file-path]
+                 (apply io/file target-dir
+                   (->> (fs/split file-path)
+                        (map #(case % ".." "dots" "." "dot" %)))))]
 
            (parse-file lexer-inst parser-inst char-set
               start-rule input target-file-fn
