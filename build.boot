@@ -1,5 +1,5 @@
 (def project 'babeloff/boot-antlr4)
-(def version "2017.10.31")
+(def version "2018.06.07-SNAPSHOT")
 
 (set-env! :resource-paths #{"resources" "src"}
           :source-paths   #{"test"}
@@ -9,7 +9,7 @@
                             [adzerk/boot-test "RELEASE" :scope "test"]
                             ;; https://mvnrepository.com/artifact/org.antlr/antlr4
                             [org.antlr/antlr4 "4.7"]
-                            [rdf-clj "0.2.0-SNAPSHOT"]
+                            [org.clojars.phreed/rdf-clj "0.2.0-SNAPSHOT"]
                             [org.clojure/java.classpath "0.2.3"]
                             [radicalzephyr/bootlaces "0.1.14" :scope "test"]])
 
